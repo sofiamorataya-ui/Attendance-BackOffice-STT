@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/27818474/README.md)
+[README.md](https://github.com/user-attachments/files/27819124/README.md)
 # Attendance BackOffice STT
 
 Sistema de gestión de asistencia para el departamento de BackOffice de **STT Logistics Group**.
