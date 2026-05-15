@@ -319,6 +319,264 @@ def inject_css():
     #MainMenu, footer {visibility: hidden;}
     header[data-testid="stHeader"] {background: transparent;}
 
+    /* ============================================================
+       TIMELINE — Dashboard "Asistencia en Vivo"
+       ============================================================ */
+    .stt-country-card {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        overflow: hidden;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    }
+
+    /* Header del bloque por país */
+    .stt-country-header {
+        padding: 16px 22px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #E2E8F0;
+    }
+    .stt-country-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: #F1F5F9;
+        color: #475569;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        margin-right: 12px;
+    }
+    .stt-country-title {
+        display: inline-block;
+        font-size: 18px;
+        font-weight: 700;
+        color: #0A0A0A;
+        vertical-align: middle;
+    }
+    .stt-country-flag-big {
+        font-size: 22px;
+        line-height: 1;
+    }
+
+    /* Headers de columnas del timeline (5am, 6, 7...) */
+    .stt-timeline-header {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        padding: 10px 22px;
+        border-bottom: 1px solid #F1F5F9;
+        background: #FAFBFC;
+    }
+    .stt-timeline-header-left {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #94A3B8;
+        align-self: center;
+    }
+    .stt-timeline-hours {
+        position: relative;
+        height: 18px;
+    }
+    .stt-timeline-hour-mark {
+        position: absolute;
+        top: 0;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: #94A3B8;
+        font-weight: 500;
+        transform: translateX(-50%);
+    }
+    .stt-timeline-hour-mark sub {
+        font-size: 8px;
+        opacity: 0.7;
+    }
+
+    /* Filas de empleados */
+    .stt-emp-row {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        padding: 14px 22px;
+        border-bottom: 1px solid #F1F5F9;
+        align-items: center;
+        min-height: 56px;
+    }
+    .stt-emp-row:last-child {
+        border-bottom: none;
+    }
+    .stt-emp-row:hover {
+        background: #FAFBFC;
+    }
+
+    /* Avatar grupo izquierdo */
+    .stt-emp-info {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .stt-flag-pill {
+        font-size: 16px;
+        line-height: 1;
+    }
+    .stt-avatar-circle {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 11px;
+        color: #475569;
+        letter-spacing: 0.5px;
+        flex-shrink: 0;
+    }
+    .stt-emp-data {
+        line-height: 1.3;
+    }
+    .stt-emp-data-name {
+        font-weight: 600;
+        color: #0A0A0A;
+        font-size: 13px;
+    }
+    .stt-emp-data-sub {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: #94A3B8;
+        letter-spacing: 0.3px;
+    }
+
+    /* Track (línea horizontal donde van los segmentos) */
+    .stt-track {
+        position: relative;
+        height: 28px;
+        background: transparent;
+    }
+    /* Marcas verticales sutiles cada hora */
+    .stt-track-grid {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: #F1F5F9;
+    }
+
+    /* Segmentos de horario */
+    .stt-segment {
+        position: absolute;
+        top: 6px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        padding: 0 8px;
+        border-radius: 2px;
+        font-family: 'Inter Tight', sans-serif;
+        font-size: 10px;
+        font-weight: 700;
+        color: #FFFFFF;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .stt-segment-work { background: #16A34A; }
+    .stt-segment-lunch { background: #DC2626; }
+    .stt-segment-vacation { background: #0891B2; }
+    .stt-segment-permit { background: #2563EB; }
+    .stt-segment-sick { background: #7C2D12; }
+    .stt-segment-overtime { background: #D97706; }
+
+    .stt-segment-label-left {
+        text-align: left;
+    }
+    .stt-segment-label-right {
+        margin-left: auto;
+        text-align: right;
+    }
+
+    /* Pill de estado "Día libre" para filas sin segmentos */
+    .stt-status-pill {
+        position: absolute;
+        top: 6px;
+        left: 0;
+        height: 16px;
+        padding: 0 12px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 12px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+    }
+
+    /* Línea AHORA vertical */
+    .stt-now-line {
+        position: absolute;
+        top: -22px;
+        bottom: -2px;
+        width: 1.5px;
+        background: #0A0A0A;
+        z-index: 10;
+        pointer-events: none;
+    }
+    .stt-now-badge {
+        position: absolute;
+        top: -22px;
+        transform: translateX(-50%);
+        background: #0A0A0A;
+        color: #FFFFFF;
+        padding: 3px 8px;
+        border-radius: 3px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+        z-index: 11;
+    }
+    .stt-now-dot {
+        position: absolute;
+        bottom: -3px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #0A0A0A;
+    }
+
+    /* Última actualización */
+    .stt-last-update {
+        text-align: right;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: #94A3B8;
+        letter-spacing: 0.5px;
+        margin-top: 8px;
+    }
+    .stt-last-update-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #16A34A;
+        margin-right: 6px;
+        animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+
     /* === Sidebar === */
     [data-testid="stSidebar"] {
         background: #0F172A;
@@ -440,3 +698,200 @@ def render_sede_header(tag: str, title: str, hours_label: str, hours_value: str)
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
+
+
+# ============================================================
+# COMPONENTES DEL TIMELINE (Dashboard Asistencia en Vivo)
+# ============================================================
+def render_timeline_header(start_hour: int = 5, end_hour: int = 21):
+    """
+    Renderiza la fila de horas (5am, 6, 7... 9pm).
+    Devuelve HTML (no lo escribe directamente, para componer dentro del card).
+    """
+    marks = []
+    total_hours = end_hour - start_hour
+    for h in range(start_hour, end_hour + 1):
+        pct = ((h - start_hour) / total_hours) * 100
+        if h == 0 or h == 12:
+            label = "12<sub>pm</sub>" if h == 12 else "12<sub>am</sub>"
+        elif h < 12:
+            label = f"{h}<sub>am</sub>" if h == start_hour else str(h)
+        elif h == 12:
+            label = "12<sub>pm</sub>"
+        else:
+            display_h = h - 12
+            label = f"{display_h}" if h != end_hour else f"{display_h}<sub>pm</sub>"
+
+        # Para mayor claridad, mostrar 'am'/'pm' en horas clave
+        if h == start_hour:
+            label = f"{h if h < 12 else h-12}<sub>{'am' if h < 12 else 'pm'}</sub>"
+        elif h == end_hour:
+            display = h if h <= 12 else h - 12
+            label = f"{display}<sub>{'am' if h < 12 else 'pm'}</sub>"
+        elif h == 12:
+            label = "12<sub>pm</sub>"
+        else:
+            display = h if h < 12 else h - 12
+            label = str(display)
+
+        marks.append(
+            f'<span class="stt-timeline-hour-mark" style="left:{pct}%">{label}</span>'
+        )
+
+    return f"""
+    <div class="stt-timeline-header">
+        <div class="stt-timeline-header-left">PERSONAL</div>
+        <div class="stt-timeline-hours">{"".join(marks)}</div>
+    </div>
+    """
+
+
+def render_timeline_now_overlay(now_time, start_hour: int = 5, end_hour: int = 21) -> str:
+    """
+    Devuelve HTML del overlay 'AHORA · HH:MM' que se renderiza sobre cada fila.
+    Devuelve string vacío si la hora actual está fuera del rango visible.
+    """
+    from datetime import time as _t
+    cur_min = now_time.hour * 60 + now_time.minute
+    start_min = start_hour * 60
+    end_min = end_hour * 60
+
+    if cur_min < start_min or cur_min > end_min:
+        return ""
+
+    pct = ((cur_min - start_min) / (end_min - start_min)) * 100
+    label = now_time.strftime("%I:%M %p").lstrip("0")
+
+    return f"""
+    <div class="stt-now-badge" style="left:{pct}%">AHORA · {label}</div>
+    <div class="stt-now-line" style="left:{pct}%">
+        <div class="stt-now-dot"></div>
+    </div>
+    """
+
+
+def render_grid_lines(start_hour: int = 5, end_hour: int = 21) -> str:
+    """Devuelve líneas verticales sutiles cada hora dentro del track."""
+    lines = []
+    total = end_hour - start_hour
+    for h in range(start_hour + 1, end_hour):
+        pct = ((h - start_hour) / total) * 100
+        lines.append(f'<div class="stt-track-grid" style="left:{pct}%"></div>')
+    return "".join(lines)
+
+
+def render_employee_timeline_row(
+    employee: dict,
+    status_data: dict,
+    now_overlay_html: str = "",
+    start_hour: int = 5,
+    end_hour: int = 21,
+) -> str:
+    """
+    Devuelve HTML de UNA fila de empleado con su barra de horario.
+    """
+    from core.config import FLAGS
+
+    flag = FLAGS.get(employee.get("pais", ""), "")
+    initials = employee.get("iniciales", "??")
+    avatar_color = employee.get("color_avatar", "#F1F5F9")
+    name = employee.get("nombre", "")
+
+    # Meta line: "9:00 AM · 7:00 PM · 9h" o "Día libre"
+    if status_data["is_day_off"] or status_data["entrada"] is None:
+        meta = status_data["status_label"]
+    else:
+        ent = status_data["entrada"].strftime("%I:%M %p").lstrip("0")
+        sal = status_data["salida"].strftime("%I:%M %p").lstrip("0")
+        hrs = status_data["scheduled_hours"]
+        meta = f"{ent} · {sal} · {hrs:g}h"
+
+    # Construir segmentos
+    segments_html = ""
+    if status_data["timeline_segments"]:
+        # Empleado con horario hoy
+        for seg in status_data["timeline_segments"]:
+            seg_class = f"stt-segment-{seg['type']}"
+            width = seg["end_pct"] - seg["start_pct"]
+
+            label_html = ""
+            if seg["label_left"]:
+                label_html += f'<span class="stt-segment-label-left">{seg["label_left"]}</span>'
+            if seg["type"] == "lunch":
+                label_html += '<span class="stt-segment-label-left">ALMUERZO</span>'
+            if seg["label_right"]:
+                label_html += f'<span class="stt-segment-label-right">{seg["label_right"]}</span>'
+
+            segments_html += (
+                f'<div class="stt-segment {seg_class}" '
+                f'style="left:{seg["start_pct"]}%; width:{width}%;">'
+                f'{label_html}</div>'
+            )
+    else:
+        # Sin segmentos: día libre, vacaciones, permiso, etc.
+        # Mostrar pill con estado
+        from core.attendance_engine import Status
+        status = status_data["status"]
+        # Para vacaciones/permisos/incapacidad → barra completa del día
+        if status in (Status.VACATION, Status.PERMIT, Status.SICK):
+            type_map = {Status.VACATION: "vacation", Status.PERMIT: "permit", Status.SICK: "sick"}
+            label_map = {Status.VACATION: "VACACIONES", Status.PERMIT: "PERMISO", Status.SICK: "INCAPACIDAD"}
+            segments_html = (
+                f'<div class="stt-segment stt-segment-{type_map[status]}" '
+                f'style="left:0%; width:100%;">'
+                f'<span class="stt-segment-label-left">{label_map[status]}</span></div>'
+            )
+        # Día libre / ausente → solo etiqueta sutil sin barra
+        else:
+            color = status_data["status_color"]
+            label = status_data["status_label"].upper()
+            segments_html = (
+                f'<span class="stt-status-pill" '
+                f'style="background:{status_data["status_bg"]}; color:{color};">'
+                f'{label}</span>'
+            )
+
+    grid_html = render_grid_lines(start_hour, end_hour)
+
+    return f"""
+    <div class="stt-emp-row">
+        <div class="stt-emp-info">
+            <span class="stt-flag-pill">{flag}</span>
+            <span class="stt-avatar-circle" style="background:{avatar_color}">{initials}</span>
+            <div class="stt-emp-data">
+                <div class="stt-emp-data-name">{name}</div>
+                <div class="stt-emp-data-sub">{meta}</div>
+            </div>
+        </div>
+        <div class="stt-track">
+            {grid_html}
+            {segments_html}
+            {now_overlay_html}
+        </div>
+    </div>
+    """
+
+
+def render_country_block(country_code: str, country_name: str, tag: str,
+                          hours_value: str, header_html: str,
+                          employee_rows_html: str) -> str:
+    """Encapsula un bloque por país (GT / VE) con header + filas."""
+    from core.config import FLAGS
+    flag = FLAGS.get(country_code, "")
+    return f"""
+    <div class="stt-country-card">
+        <div class="stt-country-header">
+            <div>
+                <span class="stt-country-tag">{tag}</span>
+                <span class="stt-country-flag-big">{flag}</span>
+                <span class="stt-country-title"> {country_name}</span>
+            </div>
+            <div class="stt-sede-hours">
+                <div class="stt-sede-hours-label">HORAS PROGRAMADAS</div>
+                <div class="stt-sede-hours-value">{hours_value}</div>
+            </div>
+        </div>
+        {header_html}
+        {employee_rows_html}
+    </div>
+    """
