@@ -1,8 +1,8 @@
-streamlit==1.39.0
-gspread==6.1.4
-google-auth==2.35.0
-pandas==2.2.3
-plotly==5.24.1
-bcrypt==4.2.0
-pytz==2024.2
-streamlit-autorefresh==1.0.1
+streamlit>=1.42.0
+gspread>=6.1.4
+google-auth>=2.35.0
+pandas>=2.2.3
+plotly>=5.24.1
+bcrypt>=4.2.0
+pytz>=2024.2
+streamlit-autorefresh>=1.0.1
