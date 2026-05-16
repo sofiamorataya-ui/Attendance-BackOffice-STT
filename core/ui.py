@@ -591,6 +591,52 @@ def inject_css():
         letter-spacing: 1.5px !important;
         text-transform: uppercase !important;
     }
+
+    /* ============================================================
+       RESPONSIVE — top bar, título, login
+       ============================================================ */
+
+    /* TV 4K (≥2560px): texto más grande */
+    @media (min-width: 2560px) {
+        .stt-title { font-size: 56px; }
+        .stt-subtitle { font-size: 13px; }
+        .stt-eyebrow { font-size: 13px; }
+        .stt-header-title { font-size: 15px; }
+        .stt-header-user { font-size: 15px; }
+    }
+
+    /* Tablet (≤1023px) */
+    @media (max-width: 1023px) {
+        .stt-title { font-size: 36px; }
+        .stt-header { padding: 12px 20px; }
+        .stt-header-title { font-size: 12px; letter-spacing: 1.5px; }
+    }
+
+    /* Smartphone (≤767px) */
+    @media (max-width: 767px) {
+        .stt-title { font-size: 28px; letter-spacing: -1px; }
+        .stt-subtitle { font-size: 10px; }
+        .stt-eyebrow { font-size: 10px; letter-spacing: 2px; }
+        .stt-header {
+            padding: 10px 16px;
+            margin: -16px -8px 16px -8px;
+        }
+        .stt-header-title {
+            font-size: 11px;
+            letter-spacing: 1.2px;
+        }
+        .stt-header-user { font-size: 11px; gap: 8px; }
+        .stt-header-user-badge {
+            font-size: 9px;
+            padding: 3px 7px;
+        }
+    }
+
+    /* Smartphone pequeño (≤480px) */
+    @media (max-width: 480px) {
+        .stt-title { font-size: 24px; }
+        .stt-header-title { display: none; }
+    }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
@@ -829,7 +875,6 @@ def render_employee_timeline_row(
             )
     else:
         # Sin segmentos: día libre, vacaciones, permiso, etc.
-        # Mostrar pill con estado
         from core.attendance_engine import Status
         status = status_data["status"]
         # Para vacaciones/permisos/incapacidad → barra completa del día
@@ -841,7 +886,13 @@ def render_employee_timeline_row(
                 f'style="left:0%; width:100%;">'
                 f'<span class="stt-segment-label-left">{label_map[status]}</span></div>'
             )
-        # Día libre / ausente → solo etiqueta sutil sin barra
+        # Día libre → barra rayada con patrón diagonal (estilo Ismael Palma)
+        elif status == Status.DAY_OFF:
+            segments_html = '<div class="stt-segment-dayoff">DÍA LIBRE</div>'
+        # Ausente → barra rayada con tinte rojo
+        elif status == Status.ABSENT:
+            segments_html = '<div class="stt-segment-absent">AUSENTE</div>'
+        # Otros estados → pill clásico
         else:
             color = status_data["status_color"]
             label = status_data["status_label"].upper()
