@@ -658,7 +658,7 @@ def render():
     # ============================================================
     # CONSTRUIR EL HTML COMPLETO COMO UN STRING ÚNICO
     # ============================================================
-    parts = [DASHBOARD_CSS, '<div class="stt-wrap">']
+    parts = ['<div class="stt-wrap">']
 
     # --- KPIs ---
     kpi_html = '<div class="stt-kpi-row">' + "".join([
@@ -775,7 +775,7 @@ def render():
     # ============================================================
     # RENDER EN UN ÚNICO IFRAME RESPONSIVO
     # ============================================================
-    # Viewport meta + base styles para responsive total
+    body_content = "".join(parts)
     full_html = (
         '<!DOCTYPE html>'
         '<html lang="es">'
@@ -783,9 +783,19 @@ def render():
         '<meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
         '<title>STT Attendance</title>'
-        + "".join(parts) +
+        + DASHBOARD_CSS +
         '</head>'
         '<body style="margin:0;padding:0;background:transparent;">'
+        + body_content +
+        '<script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous"></script>'
+        '<script>'
+        'window.addEventListener("load", function(){'
+        '  if (typeof twemoji !== "undefined") {'
+        '    twemoji.parse(document.body, {folder:"svg", ext:".svg", '
+        '      base:"https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/"});'
+        '  }'
+        '});'
+        '</script>'
         '</body>'
         '</html>'
     )
