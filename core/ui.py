@@ -17,6 +17,15 @@ def inject_css():
         font-family: 'Inter Tight', -apple-system, sans-serif !important;
     }
 
+    /* === Twemoji autoconvertido === */
+    img.emoji {
+        height: 1.2em;
+        width: 1.2em;
+        margin: 0 0.05em;
+        vertical-align: -0.2em;
+        display: inline-block;
+    }
+
     /* === Fondo general === */
     .stApp {
         background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
@@ -638,6 +647,38 @@ def inject_css():
         .stt-header-title { display: none; }
     }
     </style>
+
+    <!-- Twemoji: convierte emojis nativos en imágenes (resuelve banderas en Windows) -->
+    <script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous"></script>
+    <script>
+    (function() {
+        function runTwemoji() {
+            if (typeof twemoji !== 'undefined') {
+                twemoji.parse(document.body, {
+                    folder: 'svg',
+                    ext: '.svg',
+                    base: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/'
+                });
+            }
+        }
+        // Run inmediatamente y observar cambios del DOM (Streamlit re-renderiza)
+        runTwemoji();
+        setTimeout(runTwemoji, 200);
+        setTimeout(runTwemoji, 800);
+
+        var observer = new MutationObserver(function(mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+                if (mutations[i].addedNodes.length > 0) {
+                    runTwemoji();
+                    break;
+                }
+            }
+        });
+        if (document.body) {
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+    })();
+    </script>
     """
     st.markdown(css, unsafe_allow_html=True)
 
