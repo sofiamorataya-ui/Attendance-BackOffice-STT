@@ -8,7 +8,10 @@ from core.ui import inject_css, render_top_bar
 from core.auth import (
     is_authenticated, login, logout, current_user,
 )
-from modules import dashboard_live, admin_seed, attendance_log, overtime
+from modules import (
+    dashboard_live, admin_seed, attendance_log, overtime,
+    vacations, exceptions, holidays, birthdays, tenure, employees,
+)
 
 
 # ============================================================
@@ -172,6 +175,7 @@ def render_sidebar():
             "🇺🇸 Feriados US": "holidays",
             "🎂 Cumpleaños": "birthdays",
             "📅 Antigüedad": "tenure",
+            "👥 Empleados": "employees",
             "🛠️ Setup Inicial": "admin_seed",
         }
 
@@ -227,6 +231,7 @@ def route():
         "holidays": "FERIADOS · US",
         "birthdays": "CUMPLEAÑOS",
         "tenure": "ANTIGÜEDAD",
+        "employees": "EMPLEADOS",
         "admin_seed": "SETUP · ADMINISTRADOR",
     }
 
@@ -245,19 +250,22 @@ def route():
         attendance_log.render()
     elif module == "overtime":
         overtime.render()
+    elif module == "vacations":
+        vacations.render()
+    elif module == "exceptions":
+        exceptions.render()
+    elif module == "holidays":
+        holidays.render()
+    elif module == "birthdays":
+        birthdays.render()
+    elif module == "tenure":
+        tenure.render()
+    elif module == "employees":
+        employees.render()
     else:
-        # Placeholders de los módulos que vienen en próximas entregas
         from core.ui import render_page_title
-        titles = {
-            "vacations": ("GESTIÓN", "Vacaciones"),
-            "exceptions": ("REGISTRO", "Permisos y Ausencias"),
-            "holidays": ("CALENDARIO", "Feriados de Estados Unidos"),
-            "birthdays": ("EQUIPO", "Cumpleaños"),
-            "tenure": ("EQUIPO", "Antigüedad en la empresa"),
-        }
-        eyebrow, title = titles.get(module, ("MÓDULO", "En construcción"))
-        render_page_title(eyebrow=eyebrow, title=title)
-        st.info("🚧 Este módulo se completa en próximas entregas.")
+        render_page_title(eyebrow="MÓDULO", title="No encontrado")
+        st.warning("Módulo desconocido.")
 
 
 # ============================================================
