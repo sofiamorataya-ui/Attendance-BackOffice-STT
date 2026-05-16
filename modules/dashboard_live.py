@@ -317,6 +317,60 @@ body {
     text-transform: uppercase;
 }
 
+/* Día libre: barra completa con patrón rayado (estilo tu imagen 2) */
+.stt-segment-dayoff {
+    position: absolute;
+    top: 4px;
+    left: 0;
+    right: 0;
+    height: 20px;
+    border: 1px dashed #CBD5E1;
+    border-radius: 3px;
+    background-image: repeating-linear-gradient(
+        135deg,
+        #F1F5F9 0px,
+        #F1F5F9 6px,
+        #FFFFFF 6px,
+        #FFFFFF 12px
+    );
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748B;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+}
+
+/* Ausente: similar al día libre pero con tinte rojo sutil */
+.stt-segment-absent {
+    position: absolute;
+    top: 4px;
+    left: 0;
+    right: 0;
+    height: 20px;
+    border: 1px dashed #FCA5A5;
+    border-radius: 3px;
+    background-image: repeating-linear-gradient(
+        135deg,
+        #FEE2E2 0px,
+        #FEE2E2 6px,
+        #FFFFFF 6px,
+        #FFFFFF 12px
+    );
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    color: #991B1B;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+}
+
 /* NOW line - se renderiza UNA sola vez por country block como overlay absoluto */
 .stt-country-body {
     position: relative;
@@ -392,11 +446,133 @@ body {
     50% { opacity: 0.4; }
 }
 
-/* Responsive */
-@media (max-width: 900px) {
-    .stt-kpi-row { grid-template-columns: repeat(2, 1fr); }
-    .stt-timeline-header, .stt-emp-row { grid-template-columns: 160px 1fr; }
-    .stt-now-overlay { left: 160px; }
+/* ============================================================
+   RESPONSIVE — Soporta de smartphone (360px) hasta TV 4K (3840px)
+   ============================================================ */
+
+/* TV 4K y monitores ultra-wide (≥2560px): escala TODO un poco más */
+@media (min-width: 2560px) {
+    .stt-wrap { max-width: 2400px; margin: 0 auto; }
+    .stt-kpi-value { font-size: 52px; }
+    .stt-kpi-label { font-size: 12px; }
+    .stt-kpi-foot { font-size: 13px; }
+    .stt-country-title { font-size: 22px; }
+    .stt-sede-hours-value { font-size: 30px; }
+    .stt-emp-data-name { font-size: 15px; }
+    .stt-emp-data-sub { font-size: 12px; }
+    .stt-segment { font-size: 12px; height: 20px; }
+    .stt-timeline-hour-mark { font-size: 12px; }
+    .stt-emp-row { min-height: 70px; padding: 20px 28px; }
+}
+
+/* Desktop wide (1440px–2559px): default sin cambios mayores */
+@media (min-width: 1440px) and (max-width: 2559px) {
+    .stt-kpi-value { font-size: 42px; }
+}
+
+/* Tablet landscape / laptop pequeño (1024px–1439px) */
+@media (max-width: 1439px) {
+    .stt-kpi-value { font-size: 34px; }
+    .stt-kpi-label { font-size: 9px; letter-spacing: 1.2px; }
+    .stt-kpi { padding: 16px 18px; }
+    .stt-legend { gap: 16px; font-size: 11px; }
+    .stt-country-title { font-size: 16px; }
+    .stt-sede-hours-value { font-size: 22px; }
+}
+
+/* Tablet portrait (768px–1023px) */
+@media (max-width: 1023px) {
+    .stt-kpi-row {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+    }
+    .stt-kpi-value { font-size: 30px; }
+    .stt-timeline-header,
+    .stt-emp-row {
+        grid-template-columns: 180px 1fr;
+        padding: 12px 16px;
+    }
+    .stt-now-overlay { left: 180px; right: 16px; }
+    .stt-country-header { padding: 14px 16px; }
+    .stt-emp-data-name { font-size: 12px; }
+    .stt-emp-data-sub { font-size: 9px; }
+    .stt-timeline-hour-mark { font-size: 9px; }
+    .stt-segment { font-size: 9px; }
+}
+
+/* Smartphone horizontal y tablets pequeñas (600px–767px) */
+@media (max-width: 767px) {
+    .stt-kpi-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    .stt-kpi { padding: 14px 14px; }
+    .stt-kpi-value { font-size: 28px; }
+    .stt-kpi-foot { font-size: 10px; }
+    .stt-legend {
+        gap: 12px;
+        font-size: 10px;
+        padding: 10px 14px;
+    }
+    .stt-legend-swatch { width: 16px; height: 10px; }
+    .stt-timeline-header,
+    .stt-emp-row {
+        grid-template-columns: 140px 1fr;
+        padding: 10px 12px;
+    }
+    .stt-country-header { padding: 12px 14px; }
+    .stt-now-overlay { left: 140px; right: 12px; }
+    .stt-avatar-circle { width: 28px; height: 28px; font-size: 10px; }
+    .stt-flag-pill { font-size: 14px; }
+    .stt-emp-data-name { font-size: 11px; }
+    .stt-emp-data-sub { font-size: 9px; }
+    .stt-timeline-hour-mark { font-size: 8px; }
+    .stt-segment { font-size: 8px; padding: 0 4px; }
+    .stt-country-title { font-size: 14px; }
+    .stt-country-flag-big { font-size: 18px; }
+    .stt-sede-hours-value { font-size: 18px; }
+    .stt-now-badge { font-size: 9px; padding: 3px 6px; }
+}
+
+/* Smartphone (≤599px): layout más vertical */
+@media (max-width: 599px) {
+    .stt-kpi-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        margin-bottom: 14px;
+    }
+    .stt-kpi-value { font-size: 24px; }
+    .stt-kpi-label { font-size: 8px; letter-spacing: 1px; margin-bottom: 8px; }
+    .stt-kpi-foot { font-size: 9px; margin-top: 8px; }
+    .stt-legend {
+        gap: 8px 12px;
+        font-size: 9px;
+        padding: 8px 12px;
+    }
+    .stt-timeline-header,
+    .stt-emp-row {
+        grid-template-columns: 110px 1fr;
+        padding: 8px 10px;
+    }
+    .stt-now-overlay { left: 110px; right: 10px; }
+    .stt-emp-info { gap: 6px; }
+    .stt-avatar-circle { width: 24px; height: 24px; font-size: 9px; }
+    .stt-emp-data-name { font-size: 10px; }
+    .stt-emp-data-sub { font-size: 8px; }
+    .stt-timeline-hour-mark { font-size: 7px; }
+    .stt-segment {
+        font-size: 7px;
+        padding: 0 3px;
+        height: 14px;
+        top: 7px;
+    }
+    .stt-segment-dayoff,
+    .stt-segment-absent {
+        font-size: 8px;
+        height: 16px;
+        top: 6px;
+        letter-spacing: 0.8px;
+    }
 }
 </style>
 """
@@ -597,15 +773,44 @@ def render():
     parts.append('</div>')  # cierre stt-wrap
 
     # ============================================================
-    # RENDER EN UN ÚNICO IFRAME
+    # RENDER EN UN ÚNICO IFRAME RESPONSIVO
     # ============================================================
-    full_html = "".join(parts)
+    # Viewport meta + base styles para responsive total
+    full_html = (
+        '<!DOCTYPE html>'
+        '<html lang="es">'
+        '<head>'
+        '<meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        '<title>STT Attendance</title>'
+        + "".join(parts) +
+        '</head>'
+        '<body style="margin:0;padding:0;background:transparent;">'
+        '</body>'
+        '</html>'
+    )
 
-    # Calcular altura dinámica según número de empleados
+    # Cálculo dinámico de altura adaptado al viewport
+    # El iframe NO conoce su propio ancho, pero como tenemos breakpoints fluidos,
+    # damos una altura conservadora que cubra el peor caso (móvil que estira más)
     rows_count = len(statuses)
-    base_height = 540  # KPIs + legend + headers + last update
-    rows_height = rows_count * 76  # ~76px por fila
-    blocks_overhead = 80 * 2  # 2 country headers
-    total_height = base_height + rows_height + blocks_overhead
+    gt_count = sum(1 for s in statuses if s["employee"].get("pais") == "GT")
+    ve_count = sum(1 for s in statuses if s["employee"].get("pais") == "VE")
+
+    # Altura por fila adaptada (~76px desktop, hasta 90px móvil con padding mayor)
+    avg_row_height = 80
+    kpis_height = 220        # KPI row + legend
+    country_overhead = 130   # header + timeline header de cada bloque país
+    last_update = 50
+
+    total_height = (
+        kpis_height
+        + (country_overhead if gt_count else 0)
+        + (gt_count * avg_row_height)
+        + (country_overhead if ve_count else 0)
+        + (ve_count * avg_row_height)
+        + last_update
+        + 40  # margen extra para evitar scrollbar interno
+    )
 
     components.html(full_html, height=total_height, scrolling=False)
