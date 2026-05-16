@@ -1,101 +1,59 @@
-[README.md](https://github.com/user-attachments/files/27819124/README.md)
+[README.md](https://github.com/user-attachments/files/27839369/README.md)
 # Attendance BackOffice STT
 
-Sistema de gestión de asistencia para el departamento de BackOffice de **STT Logistics Group**.
+Sistema integral de gestión de asistencia para el equipo BackOffice de STT Logistics Group.
 
-![Built with Streamlit](https://img.shields.io/badge/Streamlit-1.39-FF4B4B?logo=streamlit&logoColor=white)
-![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
-![Google Sheets](https://img.shields.io/badge/Database-Google_Sheets-34A853?logo=googlesheets&logoColor=white)
+## 🎯 Módulos disponibles
 
----
+| Módulo | Descripción |
+|---|---|
+| **🟢 Asistencia en Vivo** | Timeline visual en tiempo real (auto-refresh 60s). Quién trabaja, en almuerzo, día libre o ausente. Línea "AHORA" móvil. |
+| **📋 Registro Asistencia** | Excepciones (llegada tarde, salida temprano, ausente, permiso, incapacidad). El selector de hora calcula los minutos tarde automáticamente. |
+| **⏱️ Horas Extras** | Matriz mensual + formulario + detalle día/semana/mes. Sábados de Henry auto-inyectados (7h c/u). |
+| **🏖️ Vacaciones** | 15 días/empleado/año. Tomados, disponibles, acumulados (1.25 días/mes). |
+| **🚨 Permisos** | Personales, incapacidad, duelo, otros. Rango fechas, motivo, badge ACTIVO. |
+| **🇺🇸 Feriados US** | 13 feriados federales. Asignación de coverage. Badge HOY/PASADO/EN Xd. |
+| **🎂 Cumpleaños** | Hero card del próximo. Ordenado por proximidad. |
+| **📅 Antigüedad** | Tiempo en la empresa en vivo (años, meses, días). Badge 🌟 VETERANO si 3+ años. |
+| **👥 Empleados** | CRUD: directorio, crear, editar, configurar horarios semanales. |
+| **🛠️ Setup Inicial** | Wizard de 7 pasos para inicializar el Google Sheet la primera vez. |
 
-## ✨ Features
+## 🚀 Deploy en Streamlit Community Cloud
 
-- 🟢 **Asistencia en Vivo** — Timeline visual del día actual con la línea "AHORA" en tiempo real
-- 📋 **Registro de Excepciones** — Llegadas tarde, salidas tempranas, ausencias
-- ⏱️ **Horas Extras** — Tracking diario, semanal y mensual con autorización
-- 🏖️ **Vacaciones** — 15 días/año por empleado, cálculo automático de disponibles
-- 🇺🇸 **Feriados US** — Coverage por feriado
-- 🎂 **Cumpleaños** — Countdown de días faltantes
-- 📅 **Antigüedad** — Tiempo en la empresa actualizado en tiempo real
-- 🔄 **Auto-refresh** — Dashboard cada 60s, otras vistas cada 5 min
+1. Subir todo el contenido del ZIP a GitHub (sobrescribiendo lo anterior)
+2. No olvides el archivo `.python-version` con `3.12`
+3. Verificar `secrets.toml` (variables raíz ANTES del bloque `[gcp_service_account]`)
+4. Reboot app en Streamlit Cloud
+5. Primera vez: contraseña de setup → Setup Inicial → ejecuta los 7 pasos
 
-## 🏗️ Stack
+## 🔧 Stack técnico
 
-- **Frontend**: Streamlit + CSS custom
-- **Backend**: Google Sheets (vía gspread)
-- **Auth**: bcrypt
-- **Charts**: Plotly
-- **TZ**: America/Guatemala (toda la app)
+- Streamlit 1.42+ con CSS custom + componentes HTML embebidos
+- Google Sheets vía gspread (8 worksheets)
+- bcrypt + sesión Streamlit para auth
+- Twemoji SVG (renderiza igual en Windows/Mac/Linux/iOS/Android)
+- Snackbar Material Design custom (4 seg auto-dismiss, sin globos infantiles)
+- Timezone: America/Guatemala
+- Auto-refresh: 60s en dashboard, 5 min en otros módulos
 
-## 🚀 Setup local
+## 📊 Worksheets de Google Sheets
 
-```bash
-git clone https://github.com/sofiamorataya-ui/Attendance-BackOffice-STT.git
-cd Attendance-BackOffice-STT
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+| Hoja | Propósito |
+|---|---|
+| Empleados | Datos maestros del equipo |
+| Horarios | Horario semanal por empleado (7 filas c/u) |
+| Asistencia | Log de excepciones |
+| Horas_Extras | Horas extras autorizadas |
+| Vacaciones | Días de vacaciones tomados |
+| Permisos | Permisos y ausencias |
+| Feriados | Feriados US + coverage |
+| Usuarios | Credenciales (bcrypt) |
 
-1. Crea un Google Sheet llamado `Attendance_BackOffice_STT_DB`
-2. Comparte el Sheet con tu service account (permisos de Editor)
-3. Copia `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` y completa
-4. Ejecuta:
+## 👥 Equipo BackOffice (8 personas)
 
-```bash
-streamlit run app.py
-```
-
-5. Login con `sofi` o `evelyn` (contraseñas definidas en `secrets.toml`)
-6. Ve a **🛠️ Setup Inicial** y ejecuta los pasos 1 → 7 una sola vez
-
-## ☁️ Deploy en Streamlit Cloud
-
-1. Push el repo a GitHub
-2. Conecta en https://streamlit.io/cloud
-3. En **Settings → Secrets** pega el contenido de tu `secrets.toml`
-4. Deploy 🚀
-
-## 📂 Estructura
-
-```
-app.py                   # Entry point + auth + routing
-core/
-  config.py              # Constantes, paleta, TZ
-  auth.py                # Login bcrypt
-  sheets.py              # Cliente Google Sheets cacheado
-  schedules.py           # Horarios base de cada empleado
-  time_utils.py          # Helpers TZ Guatemala
-  ui.py                  # Componentes UI reutilizables
-modules/
-  dashboard_live.py      # Asistencia en vivo
-  attendance_log.py      # Registro de excepciones
-  overtime.py            # Horas extras
-  vacations.py           # Vacaciones
-  holidays.py            # Feriados US
-  birthdays.py           # Cumpleaños
-  tenure.py              # Antigüedad
-  exceptions.py          # Permisos
-  admin_seed.py          # Setup inicial (oculto en prod)
-data/
-  employees_seed.py      # Datos maestros iniciales
-```
-
-## 👥 Roles
-
-| Usuario | Rol | Permisos |
-|---|---|---|
-| `sofi` | Supervisora | Lectura + escritura completa |
-| `evelyn` | Manager | Lectura + escritura completa |
-
-## 📝 Notas
-
-- **Refresh**: Dashboard cada 60s, otras vistas cada 5 min
-- **TZ**: Toda la app opera en `America/Guatemala`
-- **Vacaciones**: 15 días/año, acumulación proporcional 1.25 días/mes
-- **Henry**: Sábados 7:00–14:00 son 7 hrs extras recurrentes automáticas
+- **GT** 🇬🇹 — Evelyn (Manager), Sofia (Supervisora), Alessandro, Javier, Sebastian
+- **VE** 🇻🇪 — Anny, Henry (sábados recurrentes), Mark
 
 ---
 
-© STT Logistics Group · 2026
+Construido por Pablo para Sofia Morataya · STT Logistics Group · 2026
