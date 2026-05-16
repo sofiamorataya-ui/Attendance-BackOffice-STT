@@ -91,6 +91,36 @@ def render_login():
                 else:
                     st.error(msg)
 
+        # ============================================================
+        # ACCESO DE SETUP INICIAL (solo primera vez)
+        # ============================================================
+        with st.expander("🛠️ Setup Inicial (primer uso)"):
+            st.caption(
+                "Si es la primera vez que cargas la app, usa este acceso para "
+                "inicializar el Google Sheet. Una vez creados los usuarios, "
+                "podrás entrar normalmente con sofi/evelyn."
+            )
+            setup_pwd = st.text_input(
+                "Contraseña de setup",
+                type="password",
+                key="setup_password",
+                help="Es la misma contraseña inicial de sofi configurada en secrets.toml",
+            )
+            if st.button("Acceder a Setup", use_container_width=True, key="setup_btn"):
+                expected = st.secrets.get("initial_users", {}).get(
+                    "sofi_password", "STT_Sofi_2026!"
+                )
+                if setup_pwd == expected:
+                    st.session_state["auth_user"] = {
+                        "username": "setup",
+                        "nombre_completo": "Modo Setup",
+                        "rol": "Admin",
+                    }
+                    st.session_state["current_module"] = "admin_seed"
+                    st.rerun()
+                else:
+                    st.error("Contraseña de setup incorrecta.")
+
         st.markdown(
             f'<div style="text-align: center; margin-top: 20px; '
             f'font-family: \'JetBrains Mono\', monospace; font-size: 10px; '
