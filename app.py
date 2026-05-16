@@ -8,7 +8,7 @@ from core.ui import inject_css, render_top_bar
 from core.auth import (
     is_authenticated, login, logout, current_user,
 )
-from modules import dashboard_live, admin_seed
+from modules import dashboard_live, admin_seed, attendance_log, overtime
 
 
 # ============================================================
@@ -241,12 +241,14 @@ def route():
         dashboard_live.render()
     elif module == "admin_seed":
         admin_seed.render()
+    elif module == "attendance_log":
+        attendance_log.render()
+    elif module == "overtime":
+        overtime.render()
     else:
         # Placeholders de los módulos que vienen en próximas entregas
         from core.ui import render_page_title
         titles = {
-            "attendance_log": ("REGISTRO", "Asistencia diaria"),
-            "overtime": ("REPORTES", "Horas Extras"),
             "vacations": ("GESTIÓN", "Vacaciones"),
             "exceptions": ("REGISTRO", "Permisos y Ausencias"),
             "holidays": ("CALENDARIO", "Feriados de Estados Unidos"),
