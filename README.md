@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/27839369/README.md)
+[README.md](https://github.com/user-attachments/files/27972166/README.md)
 # Attendance BackOffice STT
 
 Sistema integral de gestión de asistencia para el equipo BackOffice de STT Logistics Group.
@@ -7,7 +7,8 @@ Sistema integral de gestión de asistencia para el equipo BackOffice de STT Logi
 
 | Módulo | Descripción |
 |---|---|
-| **🟢 Asistencia en Vivo** | Timeline visual en tiempo real (auto-refresh 60s). Quién trabaja, en almuerzo, día libre o ausente. Línea "AHORA" móvil. |
+| **🟢 Asistencia en Vivo** | Timeline visual en tiempo real (auto-refresh 60s). Quién trabaja, en almuerzo, día libre o ausente. Línea "AHORA" móvil. Botón para registrar incidencias en vivo. |
+| **🚨 Incidencias** | Histórico y reportes de incidencias del turno (sin luz, sin internet, médico, etc.). Vista de activas con botón "Volvió" + tabla histórica con filtros + resumen por empleado. |
 | **📋 Registro Asistencia** | Excepciones (llegada tarde, salida temprano, ausente, permiso, incapacidad). El selector de hora calcula los minutos tarde automáticamente. |
 | **⏱️ Horas Extras** | Matriz mensual + formulario + detalle día/semana/mes. Sábados de Henry auto-inyectados (7h c/u). |
 | **🏖️ Vacaciones** | 15 días/empleado/año. Tomados, disponibles, acumulados (1.25 días/mes). |
@@ -47,6 +48,7 @@ Sistema integral de gestión de asistencia para el equipo BackOffice de STT Logi
 | Vacaciones | Días de vacaciones tomados |
 | Permisos | Permisos y ausencias |
 | Feriados | Feriados US + coverage |
+| Incidencias | Reportes en vivo durante el turno (sin luz, médico, etc.) |
 | Usuarios | Credenciales (bcrypt) |
 
 ## 👥 Equipo BackOffice (8 personas)
