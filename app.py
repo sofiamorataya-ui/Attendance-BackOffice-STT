@@ -11,6 +11,7 @@ from core.auth import (
 from modules import (
     dashboard_live, admin_seed, attendance_log, overtime,
     vacations, exceptions, holidays, birthdays, tenure, employees,
+    incidents_history,
 )
 
 
@@ -168,10 +169,11 @@ def render_sidebar():
         # Menú principal
         modules_map = {
             "🟢 Asistencia en Vivo": "dashboard_live",
+            "🚨 Incidencias": "incidents_history",
             "📋 Registro Asistencia": "attendance_log",
             "⏱️ Horas Extras": "overtime",
             "🏖️ Vacaciones": "vacations",
-            "🚨 Permisos": "exceptions",
+            "🚦 Permisos": "exceptions",
             "🇺🇸 Feriados US": "holidays",
             "🎂 Cumpleaños": "birthdays",
             "📅 Antigüedad": "tenure",
@@ -224,6 +226,7 @@ def route():
     # Mapeo de los nombres legibles para el top bar
     section_names = {
         "dashboard_live": "PANEL EJECUTIVO",
+        "incidents_history": "INCIDENCIAS · HISTÓRICO",
         "attendance_log": "REGISTRO DE ASISTENCIA",
         "overtime": "HORAS EXTRAS",
         "vacations": "VACACIONES",
@@ -262,6 +265,8 @@ def route():
         tenure.render()
     elif module == "employees":
         employees.render()
+    elif module == "incidents_history":
+        incidents_history.render()
     else:
         from core.ui import render_page_title
         render_page_title(eyebrow="MÓDULO", title="No encontrado")
