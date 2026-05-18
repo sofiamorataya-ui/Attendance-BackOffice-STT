@@ -1,18 +1,19 @@
 """
 core/flags.py
-Sistema de renderizado de banderas usando Twemoji.
+Sistema de banderas que funciona en TODOS los entornos.
 
-Windows 10/11 desktop NO renderiza banderas emoji nativas (las muestra como letras
-"GT"/"VE" en cuadrito). Para garantizar render consistente en todas las plataformas
-(Windows, Mac, Linux, Android, iOS, TV) usamos Twemoji vía CDN.
+IMPORTANTE:
+- Windows 10/11 desktop NO renderiza banderas emoji nativas (las muestra como "GT"/"VE")
+- Android/iOS SÍ las renderizan
+- Twemoji JS funciona en la página principal pero puede fallar en iframes
 
-Cada bandera se reemplaza por un <img> SVG de Twemoji.
+ESTRATEGIA:
+- Para HTML inline (cards, tablas): usar `flag_img_inline()` que devuelve <img> SVG directo
+- Para selectbox y otros widgets de Streamlit que no permiten HTML: usar `flag_emoji_unicode()`
 """
 
-# CDN público de Twemoji 14 (latest stable)
 TWEMOJI_BASE = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg"
 
-# Mapeo país → unicode hex de Twemoji
 FLAG_CODEPOINTS = {
     "GT": "1f1ec-1f1f9",   # 🇬🇹
     "VE": "1f1fb-1f1ea",   # 🇻🇪
@@ -21,31 +22,32 @@ FLAG_CODEPOINTS = {
 }
 
 
-def flag_img(country_code: str, size: int = 16, css_extra: str = "") -> str:
+def flag_img_inline(country_code: str, size: int = 14) -> str:
     """
-    Devuelve <img> de la bandera del país en SVG (Twemoji).
+    Devuelve <img> SVG de la bandera (sin depender de JS de Twemoji).
+    Usar en HTML inline donde queremos que funcione SIEMPRE.
 
     Args:
         country_code: 'GT', 'VE', 'US', etc.
-        size: tamaño en px
-        css_extra: estilos adicionales (opcional)
+        size: tamaño en px (default 14 = mini al lado del nombre)
     """
-    cp = FLAG_CODEPOINTS.get(country_code.upper())
+    cp = FLAG_CODEPOINTS.get(str(country_code).upper())
     if not cp:
         return ""
     return (
         f'<img src="{TWEMOJI_BASE}/{cp}.svg" '
         f'alt="{country_code}" '
         f'style="width:{size}px;height:{size}px;display:inline-block;'
-        f'vertical-align:middle;{css_extra}" '
+        f'vertical-align:middle;margin-right:6px;" '
         f'loading="lazy" />'
     )
 
 
 def flag_emoji_unicode(country_code: str) -> str:
     """
-    Devuelve la bandera como caracter Unicode (fallback para st.selectbox etc.
-    donde no se puede inyectar HTML).
+    Devuelve el caracter Unicode de la bandera.
+    Usar SOLO en widgets de Streamlit donde no se puede inyectar HTML
+    (selectbox, radio, etc.). El JS global de Twemoji se encarga de convertirlas.
     """
     flags = {
         "GT": "🇬🇹",
@@ -53,4 +55,4 @@ def flag_emoji_unicode(country_code: str) -> str:
         "US": "🇺🇸",
         "MX": "🇲🇽",
     }
-    return flags.get(country_code.upper(), "")
+    return flags.get(str(country_code).upper(), "")
