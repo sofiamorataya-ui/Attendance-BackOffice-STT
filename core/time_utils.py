@@ -24,15 +24,45 @@ def current_time_gt() -> time:
 
 
 def parse_time(t_str: str) -> Optional[time]:
-    """Parsea string 'HH:MM' a objeto time. Devuelve None si vacío/inválido."""
-    if not t_str or t_str.strip() == "":
+    """
+    Parsea string a objeto time. Acepta formatos:
+    - '07:15', '7:15', '7.15', '715' (4 dígitos), '7'
+    - '07:15:00'
+    - '7:15 AM', '7:15 PM', '7:15am', '7:15PM'
+    - '7 AM', '7PM'
+    Devuelve None si vacío o inválido.
+    """
+    if t_str is None:
         return None
-    t_str = t_str.strip()
-    for fmt in ("%H:%M", "%H:%M:%S"):
+    s = str(t_str).strip()
+    if not s:
+        return None
+    # Normalizar separadores
+    s = s.replace(".", ":").upper()
+    # Probar formatos directos
+    for fmt in ("%H:%M", "%H:%M:%S", "%I:%M %p", "%I:%M%p", "%I %p", "%I%p"):
         try:
-            return datetime.strptime(t_str, fmt).time()
+            return datetime.strptime(s, fmt).time()
         except ValueError:
             continue
+    # Caso "715" o "0715" → "07:15"
+    digits = s.replace(":", "").replace(" ", "")
+    if digits.isdigit():
+        if len(digits) == 4:
+            try:
+                return time(int(digits[:2]), int(digits[2:]))
+            except ValueError:
+                pass
+        if len(digits) == 3:
+            try:
+                return time(int(digits[:1]), int(digits[1:]))
+            except ValueError:
+                pass
+        if len(digits) <= 2:
+            try:
+                return time(int(digits), 0)
+            except ValueError:
+                pass
     return None
 
 
