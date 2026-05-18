@@ -792,24 +792,13 @@ def render_sede_header(tag: str, title: str, hours_label: str, hours_value: str)
 # ============================================================
 def render_timeline_header(start_hour: int = 5, end_hour: int = 21):
     """
-    Renderiza la fila de horas (5am, 6, 7... 9pm).
-    Devuelve HTML (no lo escribe directamente, para componer dentro del card).
+    Fila de horas (5am, 6, 7... 9pm) con marcas alineadas exactamente
+    a las divisiones verticales del track.
     """
     marks = []
     total_hours = end_hour - start_hour
     for h in range(start_hour, end_hour + 1):
         pct = ((h - start_hour) / total_hours) * 100
-        if h == 0 or h == 12:
-            label = "12<sub>pm</sub>" if h == 12 else "12<sub>am</sub>"
-        elif h < 12:
-            label = f"{h}<sub>am</sub>" if h == start_hour else str(h)
-        elif h == 12:
-            label = "12<sub>pm</sub>"
-        else:
-            display_h = h - 12
-            label = f"{display_h}" if h != end_hour else f"{display_h}<sub>pm</sub>"
-
-        # Para mayor claridad, mostrar 'am'/'pm' en horas clave
         if h == start_hour:
             label = f"{h if h < 12 else h-12}<sub>{'am' if h < 12 else 'pm'}</sub>"
         elif h == end_hour:
@@ -833,12 +822,27 @@ def render_timeline_header(start_hour: int = 5, end_hour: int = 21):
     """
 
 
+def render_grid_lines(start_hour: int = 5, end_hour: int = 21) -> str:
+    """
+    Líneas verticales en CADA hora exacta del track.
+    Más visibles que antes para que se vea bien la grilla horaria.
+    """
+    lines = []
+    total = end_hour - start_hour
+    for h in range(start_hour, end_hour + 1):
+        pct = ((h - start_hour) / total) * 100
+        # Línea más marcada en horas pares y mediodía
+        is_emphasis = (h % 3 == 0) or (h == 12)
+        klass = "stt-track-grid stt-track-grid-emphasis" if is_emphasis else "stt-track-grid"
+        lines.append(f'<div class="{klass}" style="left:{pct}%"></div>')
+    return "".join(lines)
+
+
 def render_timeline_now_overlay(now_time, start_hour: int = 5, end_hour: int = 21) -> str:
     """
-    Devuelve HTML del overlay 'AHORA · HH:MM' que se renderiza sobre cada fila.
-    Devuelve string vacío si la hora actual está fuera del rango visible.
+    Devuelve HTML del overlay 'AHORA · HH:MM' sobre el timeline.
+    String vacío si la hora actual está fuera del rango.
     """
-    from datetime import time as _t
     cur_min = now_time.hour * 60 + now_time.minute
     start_min = start_hour * 60
     end_min = end_hour * 60
@@ -855,16 +859,6 @@ def render_timeline_now_overlay(now_time, start_hour: int = 5, end_hour: int = 2
         <div class="stt-now-dot"></div>
     </div>
     """
-
-
-def render_grid_lines(start_hour: int = 5, end_hour: int = 21) -> str:
-    """Devuelve líneas verticales sutiles cada hora dentro del track."""
-    lines = []
-    total = end_hour - start_hour
-    for h in range(start_hour + 1, end_hour):
-        pct = ((h - start_hour) / total) * 100
-        lines.append(f'<div class="stt-track-grid" style="left:{pct}%"></div>')
-    return "".join(lines)
 
 
 def render_employee_timeline_row(
@@ -947,46 +941,64 @@ def render_employee_timeline_row(
     grid_html = render_grid_lines(start_hour, end_hour)
 
     # ============================================================
-    # OVERLAY DE INCIDENCIA ACTIVA (si existe)
+    # OVERLAYS DE INCIDENCIAS DEL DÍA (todas, activas + cerradas)
+    # Cada una se pinta con el color de su tipo entre hora_inicio y hora_fin
     # ============================================================
     incident_overlay = ""
     incident_meta_extra = ""
     incident_badge = ""
+    from core.time_utils import parse_time, time_to_position_pct, current_time_gt
+    from datetime import time as _t
+
+    day_start = _t(start_hour, 0)
+    day_end = _t(end_hour, 0)
+
+    overlays_html_parts = []
+    day_incidents = status_data.get("day_incidents") or []
+    for inc in day_incidents:
+        try:
+            hi = parse_time(inc.get("hora_inicio", ""))
+            hf = parse_time(inc.get("hora_fin", ""))
+            if not hi:
+                continue
+            if not hf:
+                hf = current_time_gt()  # ACTIVA sin fin → hasta ahora
+            start_pct = time_to_position_pct(hi, day_start, day_end)
+            end_pct = time_to_position_pct(hf, day_start, day_end)
+            if end_pct < start_pct:
+                end_pct = start_pct + 0.5
+            start_pct = max(start_pct, 0)
+            end_pct = min(end_pct, 100)
+            width = max(end_pct - start_pct, 1.5)
+
+            color = inc.get("color", "#F97316")
+            icon = inc.get("icon", "❓")
+            label = inc.get("label", "").upper()
+            is_active = str(inc.get("estado", "")).upper() == "ACTIVA"
+            border_style = "1.5px solid " + color
+            # Si está ACTIVA, agregar animación pulsante con borde más grueso
+            if is_active:
+                border_style = "2px solid " + color
+
+            overlays_html_parts.append(
+                f'<div class="stt-incident-overlay" '
+                f'style="left:{start_pct}%; width:{width}%; '
+                f'background:repeating-linear-gradient(45deg, {color}, '
+                f'{color} 6px, {color}DD 6px, {color}DD 12px); '
+                f'border:{border_style};">'
+                f'<span class="stt-incident-label">'
+                f'{icon} {label}'
+                f'</span>'
+                f'</div>'
+            )
+        except Exception:
+            continue
+
+    incident_overlay = "".join(overlays_html_parts)
+
+    # Badge al lado del nombre si hay AL MENOS UNA activa
     active_inc = status_data.get("active_incident")
     if active_inc:
-        # Calcular posición de la incidencia: desde hora_inicio hasta AHORA
-        from core.time_utils import parse_time, time_to_position_pct, current_time_gt
-        from datetime import time as _t
-        try:
-            hi = parse_time(active_inc.get("hora_inicio", ""))
-            if hi:
-                day_start = _t(start_hour, 0)
-                day_end = _t(end_hour, 0)
-                start_pct = time_to_position_pct(hi, day_start, day_end)
-                end_pct = time_to_position_pct(current_time_gt(), day_start, day_end)
-                if end_pct < start_pct:
-                    end_pct = start_pct + 0.5
-                if start_pct < 0:
-                    start_pct = 0
-                if end_pct > 100:
-                    end_pct = 100
-                width = max(end_pct - start_pct, 1.5)
-
-                incident_overlay = (
-                    f'<div class="stt-incident-overlay" '
-                    f'style="left:{start_pct}%; width:{width}%; '
-                    f'background:repeating-linear-gradient(45deg, {active_inc["color"]}, '
-                    f'{active_inc["color"]} 6px, {active_inc["color"]}DD 6px, {active_inc["color"]}DD 12px); '
-                    f'border:1.5px solid {active_inc["color"]};">'
-                    f'<span class="stt-incident-label">'
-                    f'{active_inc["icon"]} {active_inc["label"].upper()} · {active_inc["duration_str"]}'
-                    f'</span>'
-                    f'</div>'
-                )
-        except Exception:
-            pass
-
-        # Badge a la izquierda del nombre
         incident_badge = (
             f'<span class="stt-incident-badge" '
             f'style="background:{active_inc["color"]};color:#FFFFFF;">'
