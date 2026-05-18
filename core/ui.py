@@ -876,10 +876,11 @@ def render_employee_timeline_row(
 ) -> str:
     """
     Devuelve HTML de UNA fila de empleado con su barra de horario.
+    Usa <img> SVG directo de Twemoji (no depende de JS).
     """
-    from core.config import FLAGS
+    from core.flags import flag_img_inline
 
-    flag = FLAGS.get(employee.get("pais", ""), "")
+    flag_html = flag_img_inline(employee.get("pais", ""), size=14)
     initials = employee.get("iniciales", "??")
     avatar_color = employee.get("color_avatar", "#F1F5F9")
     name = employee.get("nombre", "")
@@ -945,19 +946,73 @@ def render_employee_timeline_row(
 
     grid_html = render_grid_lines(start_hour, end_hour)
 
+    # ============================================================
+    # OVERLAY DE INCIDENCIA ACTIVA (si existe)
+    # ============================================================
+    incident_overlay = ""
+    incident_meta_extra = ""
+    incident_badge = ""
+    active_inc = status_data.get("active_incident")
+    if active_inc:
+        # Calcular posición de la incidencia: desde hora_inicio hasta AHORA
+        from core.time_utils import parse_time, time_to_position_pct, current_time_gt
+        from datetime import time as _t
+        try:
+            hi = parse_time(active_inc.get("hora_inicio", ""))
+            if hi:
+                day_start = _t(start_hour, 0)
+                day_end = _t(end_hour, 0)
+                start_pct = time_to_position_pct(hi, day_start, day_end)
+                end_pct = time_to_position_pct(current_time_gt(), day_start, day_end)
+                if end_pct < start_pct:
+                    end_pct = start_pct + 0.5
+                if start_pct < 0:
+                    start_pct = 0
+                if end_pct > 100:
+                    end_pct = 100
+                width = max(end_pct - start_pct, 1.5)
+
+                incident_overlay = (
+                    f'<div class="stt-incident-overlay" '
+                    f'style="left:{start_pct}%; width:{width}%; '
+                    f'background:repeating-linear-gradient(45deg, {active_inc["color"]}, '
+                    f'{active_inc["color"]} 6px, {active_inc["color"]}DD 6px, {active_inc["color"]}DD 12px); '
+                    f'border:1.5px solid {active_inc["color"]};">'
+                    f'<span class="stt-incident-label">'
+                    f'{active_inc["icon"]} {active_inc["label"].upper()} · {active_inc["duration_str"]}'
+                    f'</span>'
+                    f'</div>'
+                )
+        except Exception:
+            pass
+
+        # Badge a la izquierda del nombre
+        incident_badge = (
+            f'<span class="stt-incident-badge" '
+            f'style="background:{active_inc["color"]};color:#FFFFFF;">'
+            f'🚨 {active_inc["label"].upper()}'
+            f'</span>'
+        )
+        incident_meta_extra = (
+            f' <span style="color:{active_inc["color"]};font-weight:600;">'
+            f'· {active_inc["icon"]} {active_inc["duration_str"]}'
+            f'</span>'
+        )
+
     return f"""
     <div class="stt-emp-row">
         <div class="stt-emp-info">
-            <span class="stt-flag-pill">{flag}</span>
+            <span class="stt-flag-pill">{flag_html}</span>
             <span class="stt-avatar-circle" style="background:{avatar_color}">{initials}</span>
             <div class="stt-emp-data">
-                <div class="stt-emp-data-name">{name}</div>
-                <div class="stt-emp-data-sub">{meta}</div>
+                <div class="stt-emp-data-name">{name}{incident_badge}</div>
+                <div class="stt-emp-data-sub">{meta}{incident_meta_extra}</div>
             </div>
         </div>
         <div class="stt-track">
             {grid_html}
             {segments_html}
+            {incident_overlay}
             {now_overlay_html}
         </div>
     </div>
@@ -967,16 +1022,16 @@ def render_employee_timeline_row(
 def render_country_block(country_code: str, country_name: str, tag: str,
                           hours_value: str, header_html: str,
                           employee_rows_html: str) -> str:
-    """Encapsula un bloque por país (GT / VE) con header + filas."""
-    from core.config import FLAGS
-    flag = FLAGS.get(country_code, "")
+    """Encapsula un bloque por país (GT / VE) con header + filas. Bandera mini (no gigante)."""
+    from core.flags import flag_img_inline
+    flag_html = flag_img_inline(country_code, size=18)
     return f"""
     <div class="stt-country-card">
         <div class="stt-country-header">
             <div>
                 <span class="stt-country-tag">{tag}</span>
-                <span class="stt-country-flag-big">{flag}</span>
-                <span class="stt-country-title"> {country_name}</span>
+                <span class="stt-country-flag-mini">{flag_html}</span>
+                <span class="stt-country-title">{country_name}</span>
             </div>
             <div class="stt-sede-hours">
                 <div class="stt-sede-hours-label">HORAS PROGRAMADAS</div>
