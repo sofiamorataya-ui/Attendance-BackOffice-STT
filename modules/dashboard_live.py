@@ -17,8 +17,18 @@ from core.ui import (
 from core.time_utils import (
     today_gt, now_gt, current_time_gt, format_date_long,
 )
-from core.config import COLORS, REFRESH_LIVE_DASHBOARD
+from core.config import (
+    COLORS, REFRESH_LIVE_DASHBOARD,
+    INCIDENT_TYPES, INCIDENT_LABELS, INCIDENT_ICONS, INCIDENT_COLORS,
+)
 from core.attendance_engine import get_all_statuses, compute_daily_kpis
+from core.incidents import (
+    get_active_incidents, register_incident, close_incident,
+    get_current_duration_minutes, format_duration,
+)
+from core.auth import current_user_display_name
+from core.flags import flag_emoji_unicode, flag_img_inline
+from core.notifications import notify_success, notify_error
 
 
 TIMELINE_START_HOUR = 5
@@ -157,9 +167,15 @@ body {
     margin-right: 12px;
     vertical-align: middle;
 }
-.stt-country-flag-big {
-    font-size: 22px;
-    margin-right: 4px;
+.stt-country-flag-mini {
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.stt-country-flag-mini img {
+    width: 18px;
+    height: 18px;
+    display: inline-block;
     vertical-align: middle;
 }
 .stt-country-title {
@@ -233,8 +249,14 @@ body {
     gap: 10px;
 }
 .stt-flag-pill {
-    font-size: 16px;
+    display: inline-flex;
+    align-items: center;
     line-height: 1;
+}
+.stt-flag-pill img {
+    width: 14px;
+    height: 14px;
+    margin: 0;
 }
 .stt-avatar-circle {
     width: 32px;
@@ -369,6 +391,45 @@ body {
     color: #991B1B;
     letter-spacing: 1.2px;
     text-transform: uppercase;
+}
+
+/* === INCIDENCIAS ACTIVAS === */
+.stt-incident-overlay {
+    position: absolute;
+    top: 1px;
+    height: 26px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    overflow: hidden;
+}
+.stt-incident-label {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    color: #FFFFFF;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 8px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.stt-incident-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    vertical-align: middle;
 }
 
 /* NOW line - se renderiza UNA sola vez por country block como overlay absoluto */
@@ -523,13 +584,13 @@ body {
     .stt-country-header { padding: 12px 14px; }
     .stt-now-overlay { left: 140px; right: 12px; }
     .stt-avatar-circle { width: 28px; height: 28px; font-size: 10px; }
-    .stt-flag-pill { font-size: 14px; }
+    .stt-flag-pill img { width: 13px; height: 13px; }
     .stt-emp-data-name { font-size: 11px; }
     .stt-emp-data-sub { font-size: 9px; }
     .stt-timeline-hour-mark { font-size: 8px; }
     .stt-segment { font-size: 8px; padding: 0 4px; }
     .stt-country-title { font-size: 14px; }
-    .stt-country-flag-big { font-size: 18px; }
+    .stt-country-flag-mini img { width: 14px; height: 14px; }
     .stt-sede-hours-value { font-size: 18px; }
     .stt-now-badge { font-size: 9px; padding: 3px 6px; }
 }
@@ -652,6 +713,11 @@ def render():
         st.warning("No hay empleados activos. Ve a 🛠️ Setup Inicial.")
         return
 
+    # ============================================================
+    # PANEL DE INCIDENCIAS EN VIVO (Streamlit nativo, NO va en iframe)
+    # ============================================================
+    _render_incidents_panel(statuses)
+
     kpis = compute_daily_kpis(statuses)
     total = kpis["total"]
 
@@ -661,11 +727,14 @@ def render():
     parts = ['<div class="stt-wrap">']
 
     # --- KPIs ---
+    incident_color = "#F97316"  # naranja para destacar incidencias
     kpi_html = '<div class="stt-kpi-row">' + "".join([
         _build_kpi_card("PERSONAL PROGRAMADO", str(kpis["programmed"]),
                         f"/ {total}", "activos hoy", COLORS["working"]),
         _build_kpi_card("TRABAJANDO AHORA", str(kpis["working"]),
                         "", "en línea", COLORS["working"]),
+        _build_kpi_card("CON INCIDENCIA", str(kpis["with_incident"]),
+                        "", "reportes activos", incident_color),
         _build_kpi_card("EN ALMUERZO", str(kpis["lunch"]),
                         "", "pausa de comida", COLORS["lunch"]),
         _build_kpi_card("DÍA LIBRE", str(kpis["day_off"]),
@@ -679,6 +748,7 @@ def render():
     parts.append(_build_legend([
         ("Trabajando", COLORS["working"]),
         ("Almuerzo", COLORS["lunch"]),
+        ("Incidencia activa", incident_color),
         ("Hora extra", COLORS["overtime"]),
         ("Llegada tarde", COLORS["late"]),
         ("Día libre", COLORS["day_off"]),
@@ -714,12 +784,14 @@ def render():
             )
             for s in gt_sorted
         ])
+        from core.flags import flag_img_inline
+        gt_flag_img = flag_img_inline("GT", size=18)
         parts.append(
             f'<div class="stt-country-card">'
             f'<div class="stt-country-header">'
             f'<div>'
             f'<span class="stt-country-tag">GT · 01</span>'
-            f'<span class="stt-country-flag-big">🇬🇹</span>'
+            f'<span class="stt-country-flag-mini">{gt_flag_img}</span>'
             f'<span class="stt-country-title">Guatemala</span>'
             f'</div>'
             f'<div class="stt-sede-hours">'
@@ -742,12 +814,14 @@ def render():
             )
             for s in ve_sorted
         ])
+        from core.flags import flag_img_inline
+        ve_flag_img = flag_img_inline("VE", size=18)
         parts.append(
             f'<div class="stt-country-card">'
             f'<div class="stt-country-header">'
             f'<div>'
             f'<span class="stt-country-tag">VE · 02</span>'
-            f'<span class="stt-country-flag-big">🇻🇪</span>'
+            f'<span class="stt-country-flag-mini">{ve_flag_img}</span>'
             f'<span class="stt-country-title">Venezuela</span>'
             f'</div>'
             f'<div class="stt-sede-hours">'
@@ -800,18 +874,18 @@ def render():
         '</html>'
     )
 
-    # Cálculo dinámico de altura adaptado al viewport
-    # El iframe NO conoce su propio ancho, pero como tenemos breakpoints fluidos,
-    # damos una altura conservadora que cubra el peor caso (móvil que estira más)
+    # Cálculo dinámico de altura — ser GENEROSO para que NUNCA se corten empleados.
+    # Activamos scrolling=True como red de seguridad por si la app responsive estira más.
     rows_count = len(statuses)
     gt_count = sum(1 for s in statuses if s["employee"].get("pais") == "GT")
     ve_count = sum(1 for s in statuses if s["employee"].get("pais") == "VE")
 
-    # Altura por fila adaptada (~76px desktop, hasta 90px móvil con padding mayor)
-    avg_row_height = 80
-    kpis_height = 220        # KPI row + legend
-    country_overhead = 130   # header + timeline header de cada bloque país
-    last_update = 50
+    # Alturas más generosas que las anteriores (causaron que Henry/Mark se cortaran)
+    avg_row_height = 90       # +10 vs antes (80) para asegurar espacio
+    kpis_height = 260         # +40 (KPIs ahora pueden incluir incidencias activas panel)
+    country_overhead = 160    # +30 (header país + timeline header con más padding)
+    last_update_height = 60
+    safety_margin = 100       # generoso para evitar scrollbar interno o cortes
 
     total_height = (
         kpis_height
@@ -819,8 +893,196 @@ def render():
         + (gt_count * avg_row_height)
         + (country_overhead if ve_count else 0)
         + (ve_count * avg_row_height)
-        + last_update
-        + 40  # margen extra para evitar scrollbar interno
+        + last_update_height
+        + safety_margin
     )
 
-    components.html(full_html, height=total_height, scrolling=False)
+    components.html(full_html, height=total_height, scrolling=True)
+
+
+# ============================================================
+# PANEL DE INCIDENCIAS EN VIVO
+# ============================================================
+def _render_incidents_panel(statuses):
+    """
+    Panel arriba del dashboard:
+    - Tarjetas de incidencias activas con timer en vivo y botón "Volvió"
+    - Botón para registrar nueva incidencia (popup)
+    """
+    active_df = get_active_incidents(today_gt())
+    num_active = len(active_df)
+
+    # -------- Sección visual de incidencias activas --------
+    if num_active > 0:
+        cards_html_parts = []
+        for _, inc in active_df.iterrows():
+            tipo = str(inc.get("tipo", "OTRO"))
+            tipo_label = INCIDENT_LABELS.get(tipo, tipo)
+            tipo_icon = INCIDENT_ICONS.get(tipo, "❓")
+            tipo_color = INCIDENT_COLORS.get(tipo, "#64748B")
+
+            emp_name = inc.get("empleado_nombre", "")
+            emp_id = inc.get("empleado_id", "")
+
+            # Buscar el país del empleado para mostrar bandera
+            emp_pais = ""
+            for s in statuses:
+                if str(s["employee"].get("id")) == str(emp_id):
+                    emp_pais = s["employee"].get("pais", "")
+                    break
+            flag_html = flag_img_inline(emp_pais, size=14)
+
+            hora_inicio = str(inc.get("hora_inicio", ""))
+            duration_min = get_current_duration_minutes(hora_inicio)
+            duration_str = format_duration(duration_min) if duration_min > 0 else "recién"
+
+            nota = (str(inc.get("nota", "")) or "")[:60]
+
+            cards_html_parts.append(f'''
+            <div style="background:#FFFFFF;border:1px solid {tipo_color};border-radius:8px;
+                        padding:14px 16px;display:flex;align-items:center;gap:12px;
+                        box-shadow:0 2px 6px {tipo_color}22;">
+                <div style="font-size:28px;line-height:1;">{tipo_icon}</div>
+                <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                        {flag_html}
+                        <strong style="font-size:14px;color:#0A0A0A;">{emp_name}</strong>
+                        <span style="display:inline-block;padding:2px 7px;border-radius:3px;
+                                     font-size:9px;font-weight:700;letter-spacing:0.5px;
+                                     text-transform:uppercase;background:{tipo_color};color:#FFFFFF;">
+                            {tipo_label}
+                        </span>
+                    </div>
+                    <div style="font-size:11px;color:#64748B;font-family:'JetBrains Mono',monospace;
+                                letter-spacing:0.3px;">
+                        Desde {hora_inicio} · <strong style="color:{tipo_color};">{duration_str}</strong>
+                        {f'· {nota}' if nota else ''}
+                    </div>
+                </div>
+            </div>
+            ''')
+
+        # Header del panel
+        st.markdown(
+            f'<div style="display:flex;align-items:center;justify-content:space-between;'
+            f'margin:8px 0 12px 0;">'
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+            f'text-transform:uppercase;color:#DC2626;">'
+            f'🚨 INCIDENCIAS ACTIVAS · {num_active}'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
+        # Grid responsive
+        st.markdown(
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));'
+            'gap:10px;margin-bottom:12px;">' + "".join(cards_html_parts) + '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Botones de cerrar (Streamlit nativos, fuera del HTML)
+        st.caption("Cerrar incidencias activas:")
+        cols_per_row = 3
+        active_rows = active_df.to_dict("records")
+        for i in range(0, len(active_rows), cols_per_row):
+            chunk = active_rows[i:i + cols_per_row]
+            cols = st.columns(cols_per_row)
+            for j, inc in enumerate(chunk):
+                with cols[j]:
+                    inc_id = inc.get("id", "")
+                    emp_name = inc.get("empleado_nombre", "")
+                    tipo = INCIDENT_LABELS.get(str(inc.get("tipo", "")), "")
+                    if st.button(
+                        f"✓ Volvió · {emp_name}",
+                        key=f"close_inc_{inc_id}",
+                        use_container_width=True,
+                        help=f"Cerrar incidencia '{tipo}' de {emp_name}",
+                    ):
+                        try:
+                            result = close_incident(inc_id, current_user_display_name())
+                            if result["success"]:
+                                notify_success(
+                                    f"{emp_name} volvió. Duración: {format_duration(result['duration_minutes'])}",
+                                    title="Incidencia cerrada"
+                                )
+                                st.rerun()
+                            else:
+                                notify_error(result["message"])
+                        except Exception as e:
+                            notify_error(str(e))
+
+    # -------- Formulario para registrar nueva incidencia --------
+    with st.expander(
+        f"🚨 Registrar nueva incidencia" + (f" · ({num_active} activas)" if num_active else ""),
+        expanded=(num_active == 0),
+    ):
+        # Empleados sin incidencia activa
+        active_emp_ids = set(active_df["empleado_id"].astype(str).tolist()) if not active_df.empty else set()
+        available = [
+            s for s in statuses
+            if str(s["employee"].get("id")) not in active_emp_ids
+        ]
+
+        if not available:
+            st.info("Todos los empleados tienen una incidencia activa.")
+            return
+
+        emp_options = {}
+        for s in available:
+            emp = s["employee"]
+            flag_uc = flag_emoji_unicode(emp.get("pais", ""))
+            display = f"{flag_uc}  {emp['nombre']} ({emp.get('rol', '')})"
+            emp_options[display] = {
+                "id": int(emp["id"]),
+                "nombre": emp["nombre"],
+            }
+
+        with st.form("new_incident_form", clear_on_submit=True):
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                emp_display = st.selectbox(
+                    "Empleado",
+                    options=list(emp_options.keys()),
+                    key="inc_emp",
+                )
+            with col2:
+                tipo = st.selectbox(
+                    "Tipo de incidencia",
+                    options=INCIDENT_TYPES,
+                    format_func=lambda x: f"{INCIDENT_ICONS.get(x, '?')}  {INCIDENT_LABELS.get(x, x)}",
+                    key="inc_tipo",
+                )
+
+            nota = st.text_input(
+                "Nota (opcional)",
+                placeholder="Ej: Reportado por WhatsApp · Estimado de regreso 11:00 AM",
+                max_chars=200,
+                key="inc_nota",
+            )
+
+            submitted = st.form_submit_button(
+                "Registrar incidencia",
+                use_container_width=True,
+                type="primary",
+            )
+
+            if submitted:
+                try:
+                    selected = emp_options[emp_display]
+                    result = register_incident(
+                        employee_id=selected["id"],
+                        employee_name=selected["nombre"],
+                        tipo=tipo,
+                        nota=nota,
+                        registered_by=current_user_display_name(),
+                    )
+                    if result["success"]:
+                        notify_success(
+                            f"{selected['nombre']} · {INCIDENT_LABELS.get(tipo)}",
+                            title="Incidencia registrada"
+                        )
+                        st.rerun()
+                    else:
+                        notify_error(result["message"])
+                except Exception as e:
+                    notify_error(str(e))
