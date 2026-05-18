@@ -394,10 +394,20 @@ def get_all_statuses(target_date: Optional[date] = None) -> list[dict]:
     vacations = load_vacations_for_date(target_date)
     permits = load_permits_for_date(target_date)
 
-    # Cargar incidencias activas (import circular evitado al importar aquí)
-    from core.incidents import get_active_incidents, get_current_duration_minutes, format_duration
+    # Cargar TODAS las incidencias del día (cerradas + activas) para mostrarlas en el timeline
+    from core.incidents import (
+        get_active_incidents, get_current_duration_minutes,
+        format_duration, load_incidents_df,
+    )
     from core.config import INCIDENT_LABELS, INCIDENT_COLORS, INCIDENT_ICONS
     active_incidents = get_active_incidents(target_date)
+    all_incidents_df = load_incidents_df()
+    if not all_incidents_df.empty:
+        day_incidents_df = all_incidents_df[
+            all_incidents_df["fecha_parsed"] == target_date
+        ].copy()
+    else:
+        day_incidents_df = pd.DataFrame()
 
     result = []
     for _, emp in employees.iterrows():
@@ -431,8 +441,34 @@ def get_all_statuses(target_date: Optional[date] = None) -> list[dict]:
         status = compute_employee_status(emp, sched_row, att_row, vac_row, per_row)
 
         # ============================================================
-        # Inyectar incidencia activa si existe
+        # Inyectar TODAS las incidencias del día del empleado (lista)
+        # Cada una con: tipo, color, icon, hora_inicio, hora_fin, estado, duration
         # ============================================================
+        emp_incidents = []
+        if not day_incidents_df.empty:
+            emp_match = day_incidents_df[day_incidents_df["empleado_id"].astype(int) == emp_id]
+            for _, inc in emp_match.iterrows():
+                tipo = str(inc.get("tipo", "OTRO"))
+                estado = str(inc.get("estado", "")).upper()
+                hi_str = str(inc.get("hora_inicio", "") or "")
+                hf_str = str(inc.get("hora_fin", "") or "")
+                # Si está ACTIVA y no tiene hora_fin, usar la hora actual
+                if estado == "ACTIVA" and not hf_str:
+                    hf_str = current_time_gt().strftime("%H:%M")
+                emp_incidents.append({
+                    "tipo": tipo,
+                    "label": INCIDENT_LABELS.get(tipo, tipo),
+                    "color": INCIDENT_COLORS.get(tipo, "#F97316"),
+                    "icon": INCIDENT_ICONS.get(tipo, "❓"),
+                    "hora_inicio": hi_str,
+                    "hora_fin": hf_str,
+                    "estado": estado,
+                    "nota": str(inc.get("nota", "") or ""),
+                })
+
+        status["day_incidents"] = emp_incidents
+
+        # Mantener compatibilidad: active_incident sigue siendo la primera activa
         active_inc = None
         if not active_incidents.empty:
             inc_match = active_incidents[active_incidents["empleado_id"].astype(int) == emp_id]
