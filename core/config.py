@@ -141,6 +141,7 @@ INCIDENT_TYPES = [
     "MEDICO",
     "EMERGENCIA_FAMILIAR",
     "CITA_PERSONAL",
+    "BREAK",
     "OTRO",
 ]
 
@@ -151,6 +152,7 @@ INCIDENT_LABELS = {
     "MEDICO": "Médico",
     "EMERGENCIA_FAMILIAR": "Emergencia familiar",
     "CITA_PERSONAL": "Cita personal",
+    "BREAK": "Break",
     "OTRO": "Otro",
 }
 
@@ -161,6 +163,7 @@ INCIDENT_ICONS = {
     "MEDICO": "🏥",
     "EMERGENCIA_FAMILIAR": "🆘",
     "CITA_PERSONAL": "📅",
+    "BREAK": "☕",
     "OTRO": "❓",
 }
 
@@ -171,5 +174,6 @@ INCIDENT_COLORS = {
     "MEDICO": "#3B82F6",           # Azul
     "EMERGENCIA_FAMILIAR": "#DC2626",  # Rojo fuerte
     "CITA_PERSONAL": "#8B5CF6",    # Morado
+    "BREAK": "#14B8A6",            # Turquesa
     "OTRO": "#64748B",             # Gris
 }
