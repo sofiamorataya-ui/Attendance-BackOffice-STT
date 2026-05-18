@@ -410,7 +410,14 @@ body {
     justify-content: center;
     z-index: 5;
     box-shadow: 0 1px 4px rgba(0,0,0,0.15);
-    overflow: hidden;
+    overflow: visible;
+    cursor: help;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.stt-incident-overlay:hover {
+    transform: scale(1.03);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    z-index: 50;
 }
 .stt-incident-label {
     font-family: 'Inter Tight', sans-serif;
@@ -424,6 +431,79 @@ body {
     text-overflow: ellipsis;
     padding: 0 8px;
     text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    pointer-events: none;
+}
+
+/* === Tooltip custom (hover) === */
+.stt-incident-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0F172A;
+    color: #FFFFFF;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: nowrap;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 100;
+    transition: opacity 0.15s ease;
+    min-width: 180px;
+}
+.stt-incident-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 6px;
+    border-style: solid;
+    border-color: #0F172A transparent transparent transparent;
+}
+.stt-incident-overlay:hover .stt-incident-tooltip {
+    opacity: 1;
+}
+.stt-tt-title {
+    font-weight: 700;
+    font-size: 12px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #334155;
+}
+.stt-tt-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 2px 0;
+}
+.stt-tt-k {
+    color: #94A3B8;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+}
+.stt-tt-v {
+    color: #FFFFFF;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+}
+.stt-tt-dur {
+    color: #FCD34D;
+}
+.stt-tt-note {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #334155;
+    color: #CBD5E1;
+    font-size: 10px;
+    font-style: italic;
+    max-width: 240px;
+    white-space: normal;
 }
 .stt-incident-badge {
     display: inline-block;
@@ -976,10 +1056,7 @@ def _render_live_timeline(statuses):
     if ve_sorted:
         _render_country_section("VE", "Venezuela", "VE · 02", ve_hours, ve_sorted)
 
-    # ============================================================
-    # Auto-refresh
-    # ============================================================
-    st_autorefresh(interval=REFRESH_LIVE_DASHBOARD * 1000, key="dashboard_autorefresh")
+    # Nota: el auto-refresh ya está activado en render() para el modo VIVO
 
     last_update_html = (
         '<!DOCTYPE html><html><head><meta charset="UTF-8">'
