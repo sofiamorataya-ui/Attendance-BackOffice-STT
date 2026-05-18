@@ -7,6 +7,7 @@ que Streamlit fragmente y escape los divs/spans del timeline.
 """
 import streamlit as st
 import streamlit.components.v1 as components
+import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
 from core.ui import (
@@ -691,32 +692,210 @@ def _build_now_overlay(now_time, start_hour, end_hour):
 
 
 def render():
-    """Renderiza el dashboard completo en un único bloque HTML."""
-    st_autorefresh(interval=REFRESH_LIVE_DASHBOARD * 1000, key="dashboard_autorefresh")
+    """Renderiza el dashboard. Modo VIVO (hoy) o HISTÓRICO (día/sem/mes/año pasado)."""
+    from core.filters import render_period_selector
+    from core.config import INCIDENT_LABELS, INCIDENT_ICONS, INCIDENT_COLORS
+    from core.incidents import load_incidents_df, compute_row_duration, format_duration
 
-    # Header (usa st.markdown normal, son pocos elementos)
+    # Header
     render_page_title(
         eyebrow="VISTA DIARIA",
         title="Asistencia",
         subtitle=format_date_long(today_gt()),
     )
 
-    # Carga de datos
+    # ============================================================
+    # FILTRO GLOBAL DE PERÍODO
+    # ============================================================
+    st.markdown(
+        '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+        'text-transform:uppercase;color:#DC2626;margin:8px 0 8px 0;">'
+        '— FILTRO DE PERÍODO'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    period_kind, date_from, date_to, period_label = render_period_selector("dash")
+
+    # Modo: VIVO (hoy = día único y date = today) o HISTÓRICO (cualquier otro caso)
+    today = today_gt()
+    is_live_mode = (period_kind == "day" and date_from == today)
+
+    # Solo auto-refresh en modo VIVO
+    if is_live_mode:
+        st_autorefresh(interval=REFRESH_LIVE_DASHBOARD * 1000, key="dashboard_autorefresh")
+
+    st.divider()
+
+    # ============================================================
+    # MODO VIVO: timeline de HOY + panel de incidencias
+    # ============================================================
+    if is_live_mode:
+        try:
+            statuses = get_all_statuses(today)
+        except Exception as e:
+            st.error(f"⚠️ Error al cargar datos del Sheet: {e}")
+            st.caption("Verifica que el Setup Inicial se haya ejecutado correctamente.")
+            return
+
+        if not statuses:
+            st.warning("No hay empleados activos. Ve a 🛠️ Setup Inicial.")
+            return
+
+        # Render del timeline (función auxiliar)
+        _render_live_timeline(statuses)
+        return
+
+    # ============================================================
+    # MODO HISTÓRICO: resumen de incidencias del período
+    # ============================================================
+    _render_historical_summary(date_from, date_to, period_label, period_kind)
+
+
+def _render_historical_summary(date_from, date_to, period_label, period_kind):
+    """Vista histórica: resumen de incidencias en el período seleccionado."""
+    from core.incidents import load_incidents_df, compute_row_duration, format_duration
+    from core.config import INCIDENT_LABELS, INCIDENT_ICONS, INCIDENT_COLORS
+    from core.sheets import read_worksheet
+    from core.config import WS_EMPLOYEES
+
+    st.markdown(
+        f'<div style="background:#FEF3C7;border-left:3px solid #D97706;'
+        f'padding:12px 18px;border-radius:0 4px 4px 0;margin-bottom:16px;'
+        f'font-size:12px;color:#92400E;">'
+        f'📊 <strong>Modo histórico</strong> · Visualizando {period_label.lower()}. '
+        f'Selecciona "Día" + fecha de hoy para volver al modo en vivo.'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Cargar empleados
     try:
-        statuses = get_all_statuses(today_gt())
+        employees_df = read_worksheet(WS_EMPLOYEES)
     except Exception as e:
-        st.error(f"⚠️ Error al cargar datos del Sheet: {e}")
-        st.caption("Verifica que el Setup Inicial se haya ejecutado correctamente.")
+        st.error(f"Error: {e}")
         return
 
-    if not statuses:
-        st.warning("No hay empleados activos. Ve a 🛠️ Setup Inicial.")
+    employees_active = employees_df[
+        employees_df["activo"].astype(str).str.upper().isin(["TRUE", "VERDADERO", "SI", "1"])
+    ].copy() if not employees_df.empty else pd.DataFrame()
+
+    # Cargar incidencias del período
+    df = load_incidents_df()
+    if df.empty:
+        st.info("📭 No hay incidencias registradas todavía.")
         return
 
+    filtered = df[
+        (df["fecha_parsed"] >= date_from) & (df["fecha_parsed"] <= date_to)
+    ].copy()
+
+    if filtered.empty:
+        st.info(f"📭 Sin incidencias en {period_label.lower()}.")
+        return
+
+    filtered["duracion_calc"] = filtered.apply(compute_row_duration, axis=1)
+
+    # KPIs del período
+    total_inc = len(filtered)
+    total_min = int(filtered["duracion_calc"].sum())
+    empleados_afectados = filtered["empleado_id"].nunique()
+    activas = int((filtered["estado"].astype(str).str.upper() == "ACTIVA").sum())
+
+    kpi_html = f"""
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:18px 20px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:10px;">INCIDENCIAS</div>
+            <div style="font-size:36px;font-weight:700;color:#0A0A0A;line-height:1;letter-spacing:-1.5px;">{total_inc}</div>
+            <div style="margin-top:10px;font-size:11px;color:#64748B;">{activas} activa{'s' if activas != 1 else ''}</div>
+        </div>
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:18px 20px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:10px;">TIEMPO TOTAL</div>
+            <div style="font-size:36px;font-weight:700;color:#F97316;line-height:1;letter-spacing:-1.5px;">{format_duration(total_min)}</div>
+            <div style="margin-top:10px;font-size:11px;color:#64748B;">{total_min} min acumulados</div>
+        </div>
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:18px 20px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:10px;">EMPLEADOS</div>
+            <div style="font-size:36px;font-weight:700;color:#0A0A0A;line-height:1;letter-spacing:-1.5px;">{empleados_afectados}</div>
+            <div style="margin-top:10px;font-size:11px;color:#64748B;">con al menos 1 reporte</div>
+        </div>
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:18px 20px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:10px;">PROMEDIO POR REPORTE</div>
+            <div style="font-size:36px;font-weight:700;color:#0A0A0A;line-height:1;letter-spacing:-1.5px;">{format_duration(total_min // total_inc) if total_inc else '0'}</div>
+            <div style="margin-top:10px;font-size:11px;color:#64748B;">duración media</div>
+        </div>
+    </div>
+    """
+    st.markdown(kpi_html, unsafe_allow_html=True)
+
+    # Tabla de incidencias del período
+    st.markdown(
+        '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+        'text-transform:uppercase;color:#DC2626;margin:16px 0 12px 0;">'
+        '— DETALLE DEL PERÍODO</div>',
+        unsafe_allow_html=True,
+    )
+
+    sorted_df = filtered.sort_values(["fecha_parsed", "hi_parsed"], ascending=False).reset_index(drop=True)
+    rows_html = []
+    for _, row in sorted_df.iterrows():
+        emp_name = row.get("empleado_nombre", "")
+        emp_match = employees_active[employees_active["nombre"] == emp_name] if not employees_active.empty else pd.DataFrame()
+        pais = emp_match.iloc[0]["pais"] if not emp_match.empty else ""
+        flag_html = flag_img_inline(pais, size=14)
+
+        tipo = str(row.get("tipo", ""))
+        tipo_label = INCIDENT_LABELS.get(tipo, tipo)
+        tipo_icon = INCIDENT_ICONS.get(tipo, "❓")
+        tipo_color = INCIDENT_COLORS.get(tipo, "#64748B")
+
+        fecha_str = row["fecha_parsed"].strftime("%d/%m/%Y") if row["fecha_parsed"] else ""
+        hi = str(row.get("hora_inicio", "") or "")
+        hf = str(row.get("hora_fin", "") or "")
+        is_active = str(row.get("estado", "")).upper() == "ACTIVA"
+        tiempo_str = f"{hi} → en curso" if is_active else (f"{hi} → {hf}" if hf else hi)
+        duration_min = int(row.get("duracion_calc", 0) or 0)
+        nota = (str(row.get("nota", "") or ""))[:60]
+
+        rows_html.append(
+            f'<tr>'
+            f'<td class="hd-cell hd-mono">{fecha_str}</td>'
+            f'<td class="hd-cell">{flag_html}<strong style="font-size:13px;color:#0A0A0A;">{emp_name}</strong></td>'
+            f'<td class="hd-cell"><span style="margin-right:4px;font-size:14px;">{tipo_icon}</span>'
+            f'<span style="display:inline-block;padding:3px 8px;border-radius:3px;font-size:10px;'
+            f'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;'
+            f'background:{tipo_color}22;color:{tipo_color};">{tipo_label}</span></td>'
+            f'<td class="hd-cell hd-mono">{tiempo_str}</td>'
+            f'<td class="hd-cell" style="text-align:center;">'
+            f'<strong style="font-size:14px;color:{tipo_color};font-family:\'JetBrains Mono\',monospace;">{format_duration(duration_min)}</strong></td>'
+            f'<td class="hd-cell" style="font-size:11px;color:#475569;">{nota or "—"}</td>'
+            f'</tr>'
+        )
+
+    table_html = (
+        '<style>'
+        '.hd-table{width:100%;border-collapse:collapse;font-family:\'Inter Tight\',sans-serif;}'
+        '.hd-table th{padding:12px 14px;text-align:left;font-size:9px;font-weight:700;'
+        'letter-spacing:1.5px;text-transform:uppercase;color:#94A3B8;'
+        'border-bottom:1px solid #E2E8F0;background:#FAFBFC;}'
+        '.hd-cell{padding:12px 14px;border-bottom:1px solid #F1F5F9;font-size:12px;}'
+        '.hd-mono{font-family:\'JetBrains Mono\',monospace;font-size:11px;color:#334155;}'
+        '</style>'
+        '<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:8px;'
+        'overflow:hidden;overflow-x:auto;">'
+        '<table class="hd-table"><thead><tr>'
+        '<th>Fecha</th><th>Empleado</th><th>Tipo</th>'
+        '<th>Horario</th><th style="text-align:center;">Duración</th><th>Nota</th>'
+        '</tr></thead><tbody>' + "".join(rows_html) + '</tbody></table></div>'
+    )
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
+def _render_live_timeline(statuses):
+    """Renderiza el dashboard en modo VIVO (timeline + KPIs + panel incidencias por persona)."""
     # ============================================================
-    # PANEL DE INCIDENCIAS EN VIVO (Streamlit nativo, NO va en iframe)
+    # PANEL POR EMPLEADO: cada uno con su botón de registrar incidencia
     # ============================================================
-    _render_incidents_panel(statuses)
+    _render_per_employee_incidents(statuses)
 
     kpis = compute_daily_kpis(statuses)
     total = kpis["total"]
@@ -900,20 +1079,34 @@ def render():
     components.html(full_html, height=total_height, scrolling=True)
 
 
+
 # ============================================================
-# PANEL DE INCIDENCIAS EN VIVO
+# PANEL DE INCIDENCIAS POR EMPLEADO
 # ============================================================
-def _render_incidents_panel(statuses):
+def _render_per_employee_incidents(statuses):
     """
-    Panel arriba del dashboard:
-    - Tarjetas de incidencias activas con timer en vivo y botón "Volvió"
-    - Botón para registrar nueva incidencia (popup)
+    Panel donde cada empleado tiene su propio botón "🚨" que abre un form
+    inline para registrar una incidencia con hora inicio/fin manual.
+    Las incidencias activas se muestran arriba con badge "Volvió".
     """
-    active_df = get_active_incidents(today_gt())
+    today = today_gt()
+    active_df = get_active_incidents(today)
     num_active = len(active_df)
 
-    # -------- Sección visual de incidencias activas --------
+    # ============================================================
+    # SECCIÓN: INCIDENCIAS ACTIVAS HOY (banner superior)
+    # ============================================================
     if num_active > 0:
+        st.markdown(
+            f'<div style="display:flex;align-items:center;justify-content:space-between;'
+            f'margin:8px 0 12px 0;">'
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+            f'text-transform:uppercase;color:#DC2626;">'
+            f'🚨 INCIDENCIAS ACTIVAS · {num_active}'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
         cards_html_parts = []
         for _, inc in active_df.iterrows():
             tipo = str(inc.get("tipo", "OTRO"))
@@ -923,8 +1116,6 @@ def _render_incidents_panel(statuses):
 
             emp_name = inc.get("empleado_nombre", "")
             emp_id = inc.get("empleado_id", "")
-
-            # Buscar el país del empleado para mostrar bandera
             emp_pais = ""
             for s in statuses:
                 if str(s["employee"].get("id")) == str(emp_id):
@@ -935,7 +1126,6 @@ def _render_incidents_panel(statuses):
             hora_inicio = str(inc.get("hora_inicio", ""))
             duration_min = get_current_duration_minutes(hora_inicio)
             duration_str = format_duration(duration_min) if duration_min > 0 else "recién"
-
             nota = (str(inc.get("nota", "")) or "")[:60]
 
             cards_html_parts.append(f'''
@@ -944,7 +1134,7 @@ def _render_incidents_panel(statuses):
                         box-shadow:0 2px 6px {tipo_color}22;">
                 <div style="font-size:28px;line-height:1;">{tipo_icon}</div>
                 <div style="flex:1;min-width:0;">
-                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
                         {flag_html}
                         <strong style="font-size:14px;color:#0A0A0A;">{emp_name}</strong>
                         <span style="display:inline-block;padding:2px 7px;border-radius:3px;
@@ -962,44 +1152,46 @@ def _render_incidents_panel(statuses):
             </div>
             ''')
 
-        # Header del panel
-        st.markdown(
-            f'<div style="display:flex;align-items:center;justify-content:space-between;'
-            f'margin:8px 0 12px 0;">'
-            f'<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
-            f'text-transform:uppercase;color:#DC2626;">'
-            f'🚨 INCIDENCIAS ACTIVAS · {num_active}'
-            f'</div></div>',
-            unsafe_allow_html=True,
-        )
-
-        # Grid responsive
         st.markdown(
             '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));'
             'gap:10px;margin-bottom:12px;">' + "".join(cards_html_parts) + '</div>',
             unsafe_allow_html=True,
         )
 
-        # Botones de cerrar (Streamlit nativos, fuera del HTML)
-        st.caption("Cerrar incidencias activas:")
-        cols_per_row = 3
-        active_rows = active_df.to_dict("records")
-        for i in range(0, len(active_rows), cols_per_row):
-            chunk = active_rows[i:i + cols_per_row]
-            cols = st.columns(cols_per_row)
-            for j, inc in enumerate(chunk):
-                with cols[j]:
-                    inc_id = inc.get("id", "")
-                    emp_name = inc.get("empleado_nombre", "")
-                    tipo = INCIDENT_LABELS.get(str(inc.get("tipo", "")), "")
-                    if st.button(
-                        f"✓ Volvió · {emp_name}",
-                        key=f"close_inc_{inc_id}",
-                        use_container_width=True,
-                        help=f"Cerrar incidencia '{tipo}' de {emp_name}",
-                    ):
+        # Botones de cerrar (con form para hora fin manual)
+        with st.expander(f"✓ Cerrar incidencias activas ({num_active})"):
+            for _, inc in active_df.iterrows():
+                inc_id = inc.get("id", "")
+                emp_name = inc.get("empleado_nombre", "")
+                tipo = INCIDENT_LABELS.get(str(inc.get("tipo", "")), "")
+                hora_inicio_str = str(inc.get("hora_inicio", ""))
+
+                col_info, col_time, col_btn = st.columns([2, 1.2, 1])
+                with col_info:
+                    st.markdown(
+                        f'<div style="padding-top:8px;font-size:13px;">'
+                        f'<strong>{emp_name}</strong> · {tipo} · '
+                        f'<span style="font-family:\'JetBrains Mono\',monospace;color:#64748B;">'
+                        f'desde {hora_inicio_str}</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                with col_time:
+                    from datetime import time as _t
+                    hora_fin_close = st.time_input(
+                        "Hora fin",
+                        value=now_gt().time().replace(second=0, microsecond=0),
+                        step=300,
+                        key=f"close_time_{inc_id}",
+                        label_visibility="collapsed",
+                    )
+                with col_btn:
+                    if st.button("✓ Volvió", key=f"btn_close_{inc_id}", use_container_width=True):
                         try:
-                            result = close_incident(inc_id, current_user_display_name())
+                            result = close_incident(
+                                inc_id,
+                                current_user_display_name(),
+                                hora_fin=hora_fin_close,
+                            )
                             if result["success"]:
                                 notify_success(
                                     f"{emp_name} volvió. Duración: {format_duration(result['duration_minutes'])}",
@@ -1011,78 +1203,149 @@ def _render_incidents_panel(statuses):
                         except Exception as e:
                             notify_error(str(e))
 
-    # -------- Formulario para registrar nueva incidencia --------
-    with st.expander(
-        f"🚨 Registrar nueva incidencia" + (f" · ({num_active} activas)" if num_active else ""),
-        expanded=(num_active == 0),
-    ):
-        # Empleados sin incidencia activa
-        active_emp_ids = set(active_df["empleado_id"].astype(str).tolist()) if not active_df.empty else set()
-        available = [
-            s for s in statuses
-            if str(s["employee"].get("id")) not in active_emp_ids
-        ]
+    # ============================================================
+    # SECCIÓN: REGISTRAR INCIDENCIA POR EMPLEADO
+    # ============================================================
+    st.markdown(
+        '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+        'text-transform:uppercase;color:#DC2626;margin:16px 0 8px 0;">'
+        '🚨 — REGISTRAR INCIDENCIA POR EMPLEADO'
+        '</div>'
+        '<div style="font-size:12px;color:#64748B;margin-bottom:12px;">'
+        'Click en el botón de cada empleado para abrir su formulario de registro. '
+        'Indica hora inicio (obligatoria) y hora fin (opcional → queda activa si no se llena).'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-        if not available:
-            st.info("Todos los empleados tienen una incidencia activa.")
-            return
+    # IDs de empleados con incidencia activa
+    active_emp_ids = set(active_df["empleado_id"].astype(str).tolist()) if not active_df.empty else set()
 
-        emp_options = {}
-        for s in available:
+    # Ordenar empleados: Sofi/Evelyn primero, después por país y nombre
+    def _sort_key(s):
+        emp = s["employee"]
+        rol = emp.get("rol", "")
+        pais = emp.get("pais", "")
+        priority = {"Manager": 0, "Supervisora": 1}.get(rol, 2)
+        return (priority, pais, emp.get("nombre", ""))
+
+    sorted_statuses = sorted(statuses, key=_sort_key)
+
+    # Grid de empleados: 3 columnas
+    cols_per_row = 3
+    for i in range(0, len(sorted_statuses), cols_per_row):
+        chunk = sorted_statuses[i:i + cols_per_row]
+        cols = st.columns(cols_per_row)
+        for j, s in enumerate(chunk):
             emp = s["employee"]
-            flag_uc = flag_emoji_unicode(emp.get("pais", ""))
-            display = f"{flag_uc}  {emp['nombre']} ({emp.get('rol', '')})"
-            emp_options[display] = {
-                "id": int(emp["id"]),
-                "nombre": emp["nombre"],
-            }
+            emp_id = int(emp["id"])
+            emp_name = emp["nombre"]
+            pais = emp.get("pais", "")
+            iniciales = emp.get("iniciales", "??")
+            color_av = emp.get("color_avatar", "#F1F5F9")
+            flag_uc = flag_emoji_unicode(pais)
 
-        with st.form("new_incident_form", clear_on_submit=True):
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                emp_display = st.selectbox(
-                    "Empleado",
-                    options=list(emp_options.keys()),
-                    key="inc_emp",
-                )
-            with col2:
-                tipo = st.selectbox(
-                    "Tipo de incidencia",
-                    options=INCIDENT_TYPES,
-                    format_func=lambda x: f"{INCIDENT_ICONS.get(x, '?')}  {INCIDENT_LABELS.get(x, x)}",
-                    key="inc_tipo",
-                )
+            has_active = str(emp_id) in active_emp_ids
 
-            nota = st.text_input(
-                "Nota (opcional)",
-                placeholder="Ej: Reportado por WhatsApp · Estimado de regreso 11:00 AM",
-                max_chars=200,
-                key="inc_nota",
-            )
-
-            submitted = st.form_submit_button(
-                "Registrar incidencia",
-                use_container_width=True,
-                type="primary",
-            )
-
-            if submitted:
-                try:
-                    selected = emp_options[emp_display]
-                    result = register_incident(
-                        employee_id=selected["id"],
-                        employee_name=selected["nombre"],
-                        tipo=tipo,
-                        nota=nota,
-                        registered_by=current_user_display_name(),
+            with cols[j]:
+                button_label = f"{flag_uc}  🚨 {emp_name}"
+                if has_active:
+                    st.markdown(
+                        f'<div style="background:#FEF3C7;border:1px dashed #D97706;'
+                        f'border-radius:6px;padding:8px 12px;text-align:center;'
+                        f'font-size:11px;color:#92400E;margin-bottom:8px;">'
+                        f'<strong>{emp_name}</strong> tiene incidencia activa.<br>'
+                        f'Ciérrala antes de registrar otra.'
+                        f'</div>',
+                        unsafe_allow_html=True,
                     )
-                    if result["success"]:
-                        notify_success(
-                            f"{selected['nombre']} · {INCIDENT_LABELS.get(tipo)}",
-                            title="Incidencia registrada"
-                        )
-                        st.rerun()
-                    else:
-                        notify_error(result["message"])
-                except Exception as e:
-                    notify_error(str(e))
+                else:
+                    _render_employee_inline_form(emp_id, emp_name, button_label)
+
+
+def _render_employee_inline_form(emp_id: int, emp_name: str, button_label: str):
+    """
+    Form inline para registrar incidencia de un empleado específico.
+    Usa un expander con el nombre + bandera + ícono.
+    """
+    from datetime import time as _t
+    with st.expander(button_label, expanded=False):
+        # Selector de tipo
+        tipo = st.selectbox(
+            "Tipo de incidencia",
+            options=INCIDENT_TYPES,
+            format_func=lambda x: f"{INCIDENT_ICONS.get(x, '?')}  {INCIDENT_LABELS.get(x, x)}",
+            key=f"inc_tipo_{emp_id}",
+        )
+
+        # Modo: registrar abierta (sin fin) o cerrada (con fin)
+        modo = st.radio(
+            "Modo de registro",
+            options=["activa", "cerrada"],
+            format_func=lambda x: "🟢 Dejar activa (solo hora inicio)" if x == "activa" else "✓ Cerrada (hora inicio y fin)",
+            horizontal=False,
+            key=f"inc_modo_{emp_id}",
+        )
+
+        # Horas
+        now_t = now_gt().time().replace(second=0, microsecond=0)
+        if modo == "cerrada":
+            col_hi, col_hf = st.columns(2)
+            with col_hi:
+                hora_inicio = st.time_input(
+                    "Hora inicio",
+                    value=now_t,
+                    step=300,
+                    key=f"inc_hi_{emp_id}",
+                )
+            with col_hf:
+                hora_fin = st.time_input(
+                    "Hora fin",
+                    value=now_t,
+                    step=300,
+                    key=f"inc_hf_{emp_id}",
+                )
+        else:
+            hora_inicio = st.time_input(
+                "Hora inicio",
+                value=now_t,
+                step=300,
+                key=f"inc_hi_{emp_id}",
+            )
+            hora_fin = None
+
+        # Nota
+        nota = st.text_input(
+            "Nota (opcional)",
+            placeholder="Ej: Reportado por WhatsApp · Estimado de regreso 11:00 AM",
+            max_chars=200,
+            key=f"inc_nota_{emp_id}",
+        )
+
+        # Botón submit
+        if st.button(
+            "Registrar incidencia",
+            use_container_width=True,
+            type="primary",
+            key=f"inc_submit_{emp_id}",
+        ):
+            try:
+                result = register_incident(
+                    employee_id=emp_id,
+                    employee_name=emp_name,
+                    tipo=tipo,
+                    hora_inicio=hora_inicio,
+                    hora_fin=hora_fin,
+                    nota=nota,
+                    registered_by=current_user_display_name(),
+                )
+                if result["success"]:
+                    notify_success(
+                        f"{emp_name} · {INCIDENT_LABELS.get(tipo)}",
+                        title="Incidencia registrada"
+                    )
+                    st.rerun()
+                else:
+                    notify_error(result["message"])
+            except Exception as e:
+                notify_error(str(e))
