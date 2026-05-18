@@ -99,10 +99,11 @@ WS_VACATIONS = "Vacaciones"
 WS_PERMITS = "Permisos"
 WS_HOLIDAYS = "Feriados"
 WS_USERS = "Usuarios"
+WS_INCIDENTS = "Incidencias"
 
 ALL_WORKSHEETS = [
     WS_EMPLOYEES, WS_SCHEDULES, WS_ATTENDANCE, WS_OVERTIME,
-    WS_VACATIONS, WS_PERMITS, WS_HOLIDAYS, WS_USERS,
+    WS_VACATIONS, WS_PERMITS, WS_HOLIDAYS, WS_USERS, WS_INCIDENTS,
 ]
 
 # ============================================================
@@ -131,3 +132,44 @@ PERMIT_TYPES = [
     "DUELO",
     "OTRO",
 ]
+
+# Tipos de incidencia en vivo (reportes durante el turno)
+INCIDENT_TYPES = [
+    "SIN_LUZ",
+    "SIN_INTERNET",
+    "CONEXION_LENTA",
+    "MEDICO",
+    "EMERGENCIA_FAMILIAR",
+    "CITA_PERSONAL",
+    "OTRO",
+]
+
+INCIDENT_LABELS = {
+    "SIN_LUZ": "Sin luz",
+    "SIN_INTERNET": "Sin internet",
+    "CONEXION_LENTA": "Conexión lenta",
+    "MEDICO": "Médico",
+    "EMERGENCIA_FAMILIAR": "Emergencia familiar",
+    "CITA_PERSONAL": "Cita personal",
+    "OTRO": "Otro",
+}
+
+INCIDENT_ICONS = {
+    "SIN_LUZ": "🔌",
+    "SIN_INTERNET": "📡",
+    "CONEXION_LENTA": "🐌",
+    "MEDICO": "🏥",
+    "EMERGENCIA_FAMILIAR": "🆘",
+    "CITA_PERSONAL": "📅",
+    "OTRO": "❓",
+}
+
+INCIDENT_COLORS = {
+    "SIN_LUZ": "#F59E0B",          # Amarillo
+    "SIN_INTERNET": "#EF4444",     # Rojo
+    "CONEXION_LENTA": "#F97316",   # Naranja
+    "MEDICO": "#3B82F6",           # Azul
+    "EMERGENCIA_FAMILIAR": "#DC2626",  # Rojo fuerte
+    "CITA_PERSONAL": "#8B5CF6",    # Morado
+    "OTRO": "#64748B",             # Gris
+}
