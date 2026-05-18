@@ -383,6 +383,8 @@ def get_all_statuses(target_date: Optional[date] = None) -> list[dict]:
     """
     Devuelve el estado actual de todos los empleados activos.
     Cada elemento contiene los datos del empleado + el dict de status.
+    Si un empleado tiene una incidencia ACTIVA, se inyecta en el dict y se
+    sobre-pintan los segmentos del timeline con barra naranja.
     """
     target_date = target_date or today_gt()
 
@@ -391,6 +393,11 @@ def get_all_statuses(target_date: Optional[date] = None) -> list[dict]:
     attendance = load_attendance_exceptions(target_date)
     vacations = load_vacations_for_date(target_date)
     permits = load_permits_for_date(target_date)
+
+    # Cargar incidencias activas (import circular evitado al importar aquí)
+    from core.incidents import get_active_incidents, get_current_duration_minutes, format_duration
+    from core.config import INCIDENT_LABELS, INCIDENT_COLORS, INCIDENT_ICONS
+    active_incidents = get_active_incidents(target_date)
 
     result = []
     for _, emp in employees.iterrows():
@@ -423,6 +430,37 @@ def get_all_statuses(target_date: Optional[date] = None) -> list[dict]:
 
         status = compute_employee_status(emp, sched_row, att_row, vac_row, per_row)
 
+        # ============================================================
+        # Inyectar incidencia activa si existe
+        # ============================================================
+        active_inc = None
+        if not active_incidents.empty:
+            inc_match = active_incidents[active_incidents["empleado_id"].astype(int) == emp_id]
+            if not inc_match.empty:
+                active_inc = inc_match.iloc[0].to_dict()
+
+        if active_inc:
+            tipo = str(active_inc.get("tipo", "OTRO"))
+            tipo_label = INCIDENT_LABELS.get(tipo, tipo)
+            tipo_color = INCIDENT_COLORS.get(tipo, "#F97316")
+            tipo_icon = INCIDENT_ICONS.get(tipo, "❓")
+            hora_inicio_str = str(active_inc.get("hora_inicio", ""))
+            duration_min = get_current_duration_minutes(hora_inicio_str)
+            duration_str = format_duration(duration_min) if duration_min > 0 else "recién"
+
+            status["active_incident"] = {
+                "tipo": tipo,
+                "label": tipo_label,
+                "color": tipo_color,
+                "icon": tipo_icon,
+                "hora_inicio": hora_inicio_str,
+                "duration_min": duration_min,
+                "duration_str": duration_str,
+                "nota": str(active_inc.get("nota", "") or ""),
+            }
+        else:
+            status["active_incident"] = None
+
         result.append({
             "employee": emp.to_dict(),
             **status,
@@ -453,12 +491,17 @@ def compute_daily_kpis(statuses: list[dict]) -> dict:
     not_yet = sum(1 for s in statuses if s["status"] == Status.SCHEDULED_NOT_YET)
     done = sum(1 for s in statuses if s["status"] == Status.WORKED_DONE)
 
+    # NUEVO: incidencias activas (descontadas de working para no inflar el KPI)
+    with_incident = sum(1 for s in statuses if s.get("active_incident"))
+    working_effective = max(working - with_incident, 0)
+
     other_absences = vacation + permit + sick + absent
 
     return {
         "total": total,
         "programmed": programmed,
-        "working": working,
+        "working": working_effective,
+        "with_incident": with_incident,
         "lunch": lunch,
         "day_off": day_off,
         "other_absences": other_absences,
