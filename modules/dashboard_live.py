@@ -434,10 +434,10 @@ body {
     pointer-events: none;
 }
 
-/* === Tooltip custom (hover) === */
+/* === Tooltip custom (hover) - debajo de la barra === */
 .stt-incident-tooltip {
     position: absolute;
-    bottom: calc(100% + 8px);
+    top: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%);
     background: #0F172A;
@@ -458,12 +458,12 @@ body {
 .stt-incident-tooltip::after {
     content: '';
     position: absolute;
-    top: 100%;
+    bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
     border-width: 6px;
     border-style: solid;
-    border-color: #0F172A transparent transparent transparent;
+    border-color: transparent transparent #0F172A transparent;
 }
 .stt-incident-overlay:hover .stt-incident-tooltip {
     opacity: 1;
@@ -1176,21 +1176,21 @@ def _render_employee_row_with_form(status_data: dict):
     col_row, col_btn = st.columns([20, 1])
 
     with col_row:
-        components.html(full_row_html, height=92, scrolling=False)
+        components.html(full_row_html, height=140, scrolling=False)
 
     with col_btn:
-        st.markdown("<div style='padding-top:30px;'></div>", unsafe_allow_html=True)
-        if st.button(
+        st.markdown("<div style='padding-top:55px;'></div>", unsafe_allow_html=True)
+        button_clicked = st.button(
             "🚨",
             key=f"open_dialog_{emp_id}",
             help=f"Registrar incidencia para {emp_name}",
-        ):
-            st.session_state[f"show_dialog_{emp_id}"] = True
+        )
 
     # ============================================================
-    # DIALOG POPUP: solo si el botón fue clickeado
+    # DIALOG POPUP: SOLO si el botón fue presionado EN ESTE rerun
+    # (no se mantiene en session_state entre auto-refreshes)
     # ============================================================
-    if st.session_state.get(f"show_dialog_{emp_id}"):
+    if button_clicked:
         _show_incident_dialog(emp_id, emp_name, status_data)
 
 
@@ -1275,7 +1275,6 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
 
     with col_a:
         if st.button("Cancelar", use_container_width=True, key=f"dlg_cancel_{emp_id}"):
-            st.session_state[f"show_dialog_{emp_id}"] = False
             st.rerun()
 
     with col_b:
@@ -1302,8 +1301,7 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
                         f"{emp_name} · {INCIDENT_LABELS.get(tipo)} · {format_duration(result['duracion_min'])}",
                         title="Incidencia registrada"
                     )
-                    # Cerrar dialog e invalidar cache para refrescar el timeline
-                    st.session_state[f"show_dialog_{emp_id}"] = False
+                    # Invalidar cache para refrescar el timeline con la nueva incidencia
                     from core.sheets import invalidate_cache
                     invalidate_cache()
                     st.rerun()
