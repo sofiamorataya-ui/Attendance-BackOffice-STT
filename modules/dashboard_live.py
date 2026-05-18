@@ -890,23 +890,26 @@ def _render_historical_summary(date_from, date_to, period_label, period_kind):
     st.markdown(table_html, unsafe_allow_html=True)
 
 
+# ============================================================
+# DASHBOARD EN VIVO - LAYOUT REFACTORIZADO
+# Filas Streamlit nativas para que el expander quede DEBAJO de cada empleado
+# ============================================================
 def _render_live_timeline(statuses):
-    """Renderiza el dashboard en modo VIVO (timeline + KPIs + panel incidencias por persona)."""
-    # ============================================================
-    # PANEL POR EMPLEADO: cada uno con su botón de registrar incidencia
-    # ============================================================
-    _render_per_employee_incidents(statuses)
+    """
+    Layout:
+    - KPIs (1 iframe HTML)
+    - Por cada país: header + timeline header + filas (cada empleado = 1 iframe + 1 expander Streamlit)
+    """
+    from core.incidents import calculate_duration_minutes
+    from datetime import time as _t
 
     kpis = compute_daily_kpis(statuses)
     total = kpis["total"]
+    incident_color = "#F97316"
 
     # ============================================================
-    # CONSTRUIR EL HTML COMPLETO COMO UN STRING ÚNICO
+    # SECCIÓN 1: KPIs (iframe único)
     # ============================================================
-    parts = ['<div class="stt-wrap">']
-
-    # --- KPIs ---
-    incident_color = "#F97316"  # naranja para destacar incidencias
     kpi_html = '<div class="stt-kpi-row">' + "".join([
         _build_kpi_card("PERSONAL PROGRAMADO", str(kpis["programmed"]),
                         f"/ {total}", "activos hoy", COLORS["working"]),
@@ -921,277 +924,268 @@ def _render_live_timeline(statuses):
         _build_kpi_card("OTRAS AUSENCIAS", str(kpis["other_absences"]),
                         "", "permiso · vacaciones · incapacidad", COLORS["permit"]),
     ]) + '</div>'
-    parts.append(kpi_html)
 
-    # --- Legend ---
-    parts.append(_build_legend([
+    legend_html = _build_legend([
         ("Trabajando", COLORS["working"]),
         ("Almuerzo", COLORS["lunch"]),
         ("Incidencia activa", incident_color),
         ("Hora extra", COLORS["overtime"]),
-        ("Llegada tarde", COLORS["late"]),
         ("Día libre", COLORS["day_off"]),
-        ("Permiso", COLORS["permit"]),
-        ("Vacaciones", COLORS["vacation"]),
-        ("Incapacidad", COLORS["sick"]),
-    ]))
+        ("Vacaciones / Permiso", COLORS["vacation"]),
+    ])
 
-    # --- Bloques por país ---
+    full_kpi_html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        + DASHBOARD_CSS +
+        '</head><body style="margin:0;padding:0;background:transparent;">'
+        '<div class="stt-wrap">' + kpi_html + legend_html + '</div>'
+        '</body></html>'
+    )
+    components.html(full_kpi_html, height=260, scrolling=False)
+
+    # ============================================================
+    # SECCIÓN 2: PRE-CALCULAR datos por país
+    # ============================================================
     gt_statuses = [s for s in statuses if s["employee"].get("pais") == "GT"]
     ve_statuses = [s for s in statuses if s["employee"].get("pais") == "VE"]
+    gt_hours = sum(s.get("scheduled_hours", 0) for s in gt_statuses if not s.get("is_day_off"))
+    ve_hours = sum(s.get("scheduled_hours", 0) for s in ve_statuses if not s.get("is_day_off"))
 
-    gt_hours = sum(s["scheduled_hours"] for s in gt_statuses)
-    ve_hours = sum(s["scheduled_hours"] for s in ve_statuses)
-
-    now_overlay = _build_now_overlay(
-        current_time_gt(), TIMELINE_START_HOUR, TIMELINE_END_HOUR,
-    )
-    timeline_header = render_timeline_header(TIMELINE_START_HOUR, TIMELINE_END_HOUR)
-
-    def sort_key(s):
-        rol = s["employee"].get("rol", "")
-        priority = {"Manager": 0, "Supervisora": 1}.get(rol, 2)
-        return (priority, s["employee"].get("nombre", ""))
-
-    # Guatemala
-    if gt_statuses:
-        gt_sorted = sorted(gt_statuses, key=sort_key)
-        rows = "".join([
-            render_employee_timeline_row(
-                s["employee"], s, "",  # No incluir overlay por fila
-                TIMELINE_START_HOUR, TIMELINE_END_HOUR,
-            )
-            for s in gt_sorted
-        ])
-        from core.flags import flag_img_inline
-        gt_flag_img = flag_img_inline("GT", size=18)
-        parts.append(
-            f'<div class="stt-country-card">'
-            f'<div class="stt-country-header">'
-            f'<div>'
-            f'<span class="stt-country-tag">GT · 01</span>'
-            f'<span class="stt-country-flag-mini">{gt_flag_img}</span>'
-            f'<span class="stt-country-title">Guatemala</span>'
-            f'</div>'
-            f'<div class="stt-sede-hours">'
-            f'<div class="stt-sede-hours-label">HORAS PROGRAMADAS</div>'
-            f'<div class="stt-sede-hours-value">{gt_hours:.0f}h</div>'
-            f'</div></div>'
-            f'<div class="stt-country-body">'
-            f'{timeline_header}{rows}'
-            f'{now_overlay}'
-            f'</div></div>'
-        )
-
-    # Venezuela
-    if ve_statuses:
-        ve_sorted = sorted(ve_statuses, key=lambda s: s["employee"].get("nombre", ""))
-        rows = "".join([
-            render_employee_timeline_row(
-                s["employee"], s, "",
-                TIMELINE_START_HOUR, TIMELINE_END_HOUR,
-            )
-            for s in ve_sorted
-        ])
-        from core.flags import flag_img_inline
-        ve_flag_img = flag_img_inline("VE", size=18)
-        parts.append(
-            f'<div class="stt-country-card">'
-            f'<div class="stt-country-header">'
-            f'<div>'
-            f'<span class="stt-country-tag">VE · 02</span>'
-            f'<span class="stt-country-flag-mini">{ve_flag_img}</span>'
-            f'<span class="stt-country-title">Venezuela</span>'
-            f'</div>'
-            f'<div class="stt-sede-hours">'
-            f'<div class="stt-sede-hours-label">HORAS PROGRAMADAS</div>'
-            f'<div class="stt-sede-hours-value">{ve_hours:.0f}h</div>'
-            f'</div></div>'
-            f'<div class="stt-country-body">'
-            f'{timeline_header}{rows}'
-            f'{now_overlay}'
-            f'</div></div>'
-        )
-
-    # Last update
-    now = now_gt()
-    parts.append(
-        f'<div class="stt-last-update">'
-        f'<span class="stt-last-update-dot"></span>'
-        f'EN VIVO · Última actualización: {now.strftime("%I:%M:%S %p").lstrip("0")} · '
-        f'Auto-refresh cada {REFRESH_LIVE_DASHBOARD}s'
-        f'</div>'
-    )
-
-    parts.append('</div>')  # cierre stt-wrap
-
-    # ============================================================
-    # RENDER EN UN ÚNICO IFRAME RESPONSIVO
-    # ============================================================
-    body_content = "".join(parts)
-    full_html = (
-        '<!DOCTYPE html>'
-        '<html lang="es">'
-        '<head>'
-        '<meta charset="UTF-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        '<title>STT Attendance</title>'
-        + DASHBOARD_CSS +
-        '</head>'
-        '<body style="margin:0;padding:0;background:transparent;">'
-        + body_content +
-        '<script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous"></script>'
-        '<script>'
-        'window.addEventListener("load", function(){'
-        '  if (typeof twemoji !== "undefined") {'
-        '    twemoji.parse(document.body, {folder:"svg", ext:".svg", '
-        '      base:"https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/"});'
-        '  }'
-        '});'
-        '</script>'
-        '</body>'
-        '</html>'
-    )
-
-    # Cálculo dinámico de altura — ser GENEROSO para que NUNCA se corten empleados.
-    # Activamos scrolling=True como red de seguridad por si la app responsive estira más.
-    rows_count = len(statuses)
-    gt_count = sum(1 for s in statuses if s["employee"].get("pais") == "GT")
-    ve_count = sum(1 for s in statuses if s["employee"].get("pais") == "VE")
-
-    # Alturas más generosas que las anteriores (causaron que Henry/Mark se cortaran)
-    avg_row_height = 90       # +10 vs antes (80) para asegurar espacio
-    kpis_height = 260         # +40 (KPIs ahora pueden incluir incidencias activas panel)
-    country_overhead = 160    # +30 (header país + timeline header con más padding)
-    last_update_height = 60
-    safety_margin = 100       # generoso para evitar scrollbar interno o cortes
-
-    total_height = (
-        kpis_height
-        + (country_overhead if gt_count else 0)
-        + (gt_count * avg_row_height)
-        + (country_overhead if ve_count else 0)
-        + (ve_count * avg_row_height)
-        + last_update_height
-        + safety_margin
-    )
-
-    components.html(full_html, height=total_height, scrolling=True)
-
-
-
-# ============================================================
-# PANEL DE INCIDENCIAS POR EMPLEADO
-# ============================================================
-def _render_per_employee_incidents(statuses):
-    """
-    Una fila por empleado con expander para registrar incidencia inline.
-    Cada fila: [bandera] [avatar] [nombre + rol] → click → form abajo con:
-    Tipo + Hora Inicio + Hora Fin + Nota + Botón.
-    """
-    today = today_gt()
-    active_df = get_active_incidents(today)
-    num_active = len(active_df)
-
-    # ============================================================
-    # BANNER DE INCIDENCIAS ACTIVAS (si las hay)
-    # ============================================================
-    if num_active > 0:
-        st.markdown(
-            f'<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
-            f'text-transform:uppercase;color:#DC2626;margin:8px 0 12px 0;">'
-            f'🚨 INCIDENCIAS ACTIVAS · {num_active}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-        cards_html_parts = []
-        for _, inc in active_df.iterrows():
-            tipo = str(inc.get("tipo", "OTRO"))
-            tipo_label = INCIDENT_LABELS.get(tipo, tipo)
-            tipo_icon = INCIDENT_ICONS.get(tipo, "❓")
-            tipo_color = INCIDENT_COLORS.get(tipo, "#64748B")
-
-            emp_name = inc.get("empleado_nombre", "")
-            emp_id = inc.get("empleado_id", "")
-            emp_pais = ""
-            for s in statuses:
-                if str(s["employee"].get("id")) == str(emp_id):
-                    emp_pais = s["employee"].get("pais", "")
-                    break
-            flag_html = flag_img_inline(emp_pais, size=14)
-
-            hora_inicio = str(inc.get("hora_inicio", ""))
-            duration_min = get_current_duration_minutes(hora_inicio)
-            duration_str = format_duration(duration_min) if duration_min > 0 else "recién"
-            nota = (str(inc.get("nota", "")) or "")[:60]
-
-            cards_html_parts.append(f'''
-            <div style="background:#FFFFFF;border:1px solid {tipo_color};border-radius:8px;
-                        padding:14px 16px;display:flex;align-items:center;gap:12px;
-                        box-shadow:0 2px 6px {tipo_color}22;">
-                <div style="font-size:28px;line-height:1;">{tipo_icon}</div>
-                <div style="flex:1;min-width:0;">
-                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
-                        {flag_html}
-                        <strong style="font-size:14px;color:#0A0A0A;">{emp_name}</strong>
-                        <span style="display:inline-block;padding:2px 7px;border-radius:3px;
-                                     font-size:9px;font-weight:700;letter-spacing:0.5px;
-                                     text-transform:uppercase;background:{tipo_color};color:#FFFFFF;">
-                            {tipo_label}
-                        </span>
-                    </div>
-                    <div style="font-size:11px;color:#64748B;font-family:'JetBrains Mono',monospace;
-                                letter-spacing:0.3px;">
-                        Desde {hora_inicio} · <strong style="color:{tipo_color};">{duration_str}</strong>
-                        {f'· {nota}' if nota else ''}
-                    </div>
-                </div>
-            </div>
-            ''')
-
-        st.markdown(
-            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));'
-            'gap:10px;margin-bottom:16px;">' + "".join(cards_html_parts) + '</div>',
-            unsafe_allow_html=True,
-        )
-
-    # ============================================================
-    # FILAS POR EMPLEADO con expander para registrar incidencia
-    # ============================================================
-    st.markdown(
-        '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
-        'text-transform:uppercase;color:#DC2626;margin:8px 0 4px 0;">'
-        '🚨 — REGISTRAR INCIDENCIA'
-        '</div>'
-        '<div style="font-size:12px;color:#64748B;margin-bottom:12px;">'
-        'Click en el nombre de un empleado para abrir su formulario.'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    # Ordenar: managers/supervisores primero, después por país y nombre
+    # Ordenar: managers/supervisores primero
     def _sort_key(s):
         emp = s["employee"]
         rol = emp.get("rol", "")
         priority = {"Manager": 0, "Supervisora": 1, "Supervisor": 1}.get(rol, 2)
-        return (priority, emp.get("pais", ""), emp.get("nombre", ""))
+        return (priority, emp.get("nombre", ""))
 
-    sorted_statuses = sorted(statuses, key=_sort_key)
+    gt_sorted = sorted(gt_statuses, key=_sort_key)
+    ve_sorted = sorted(ve_statuses, key=_sort_key)
 
-    # Una fila por empleado con expander
+    # ============================================================
+    # SECCIÓN 3: Renderizar cada país
+    # ============================================================
+    if gt_sorted:
+        _render_country_section("GT", "Guatemala", "GT · 01", gt_hours, gt_sorted)
+
+    if ve_sorted:
+        _render_country_section("VE", "Venezuela", "VE · 02", ve_hours, ve_sorted)
+
+    # ============================================================
+    # Auto-refresh
+    # ============================================================
+    st_autorefresh(interval=REFRESH_LIVE_DASHBOARD * 1000, key="dashboard_autorefresh")
+
+    last_update_html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        + DASHBOARD_CSS +
+        '</head><body style="margin:0;padding:0;background:transparent;">'
+        '<div class="stt-wrap"><div class="stt-last-update">'
+        f'<span class="stt-live-dot"></span> EN VIVO · Última actualización: '
+        f'{current_time_gt().strftime("%H:%M:%S")}'
+        '</div></div></body></html>'
+    )
+    components.html(last_update_html, height=60, scrolling=False)
+
+
+def _render_country_section(country_code: str, country_name: str, tag: str,
+                             hours_value: float, sorted_statuses: list):
+    """
+    Renderiza un país: header + timeline header + por cada empleado [fila + expander].
+    """
+    # ---- Header del país (iframe) ----
+    flag_img = flag_img_inline(country_code, size=18)
+    country_header_html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        + DASHBOARD_CSS +
+        '</head><body style="margin:0;padding:0;background:transparent;">'
+        '<div class="stt-wrap">'
+        '<div class="stt-country-card">'
+        '<div class="stt-country-header">'
+        '<div>'
+        f'<span class="stt-country-tag">{tag}</span>'
+        f'<span class="stt-country-flag-mini">{flag_img}</span>'
+        f'<span class="stt-country-title">{country_name}</span>'
+        '</div>'
+        '<div class="stt-sede-hours">'
+        '<div class="stt-sede-hours-label">HORAS PROGRAMADAS</div>'
+        f'<div class="stt-sede-hours-value">{hours_value:.0f}h</div>'
+        '</div></div>'
+        '</div></div></body></html>'
+    )
+    components.html(country_header_html, height=110, scrolling=False)
+
+    # ---- Timeline header (las horas) ----
+    timeline_hdr_html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        + DASHBOARD_CSS +
+        '</head><body style="margin:0;padding:0;background:transparent;">'
+        '<div class="stt-wrap">'
+        '<div class="stt-country-card" style="margin-top:-12px;padding-top:0;'
+        'border-top:0;border-top-left-radius:0;border-top-right-radius:0;">'
+        + render_timeline_header(TIMELINE_START_HOUR, TIMELINE_END_HOUR) +
+        '</div></div></body></html>'
+    )
+    components.html(timeline_hdr_html, height=60, scrolling=False)
+
+    # ---- Por cada empleado: fila visual + expander nativo ----
     for s in sorted_statuses:
-        emp = s["employee"]
-        emp_id = int(emp["id"])
-        emp_name = emp["nombre"]
-        pais = emp.get("pais", "")
-        flag_uc = flag_emoji_unicode(pais)
-        rol = emp.get("rol", "")
+        _render_employee_row_with_form(s)
 
-        # Label del expander: [bandera] [nombre] · [rol]
-        expander_label = f"{flag_uc}  🚨  {emp_name}  ·  {rol}"
 
-        with st.expander(expander_label, expanded=False):
+def _render_employee_row_with_form(status_data: dict):
+    """
+    Una fila de empleado:
+    - Bloque visual (iframe): nombre, avatar, segmentos del horario, línea AHORA si aplica
+    - Debajo: expander de Streamlit con formulario de incidencia
+    """
+    from core.incidents import calculate_duration_minutes
+    from datetime import time as _t
+
+    emp = status_data["employee"]
+    emp_id = int(emp["id"])
+    emp_name = emp["nombre"]
+    pais = emp.get("pais", "")
+    rol = emp.get("rol", "")
+    flag_uc = flag_emoji_unicode(pais)
+
+    # Overlay de "AHORA" en esta fila (línea vertical)
+    now_overlay_html = ""
+    try:
+        nt = current_time_gt()
+        if _t(TIMELINE_START_HOUR, 0) <= nt <= _t(TIMELINE_END_HOUR, 0):
+            from core.time_utils import time_to_position_pct
+            pct = time_to_position_pct(nt, _t(TIMELINE_START_HOUR, 0), _t(TIMELINE_END_HOUR, 0))
+            now_overlay_html = (
+                f'<div class="stt-now-row-overlay" style="left:{pct}%;">'
+                f'<div class="stt-now-row-badge">AHORA · {nt.strftime("%I:%M %p").lstrip("0")}</div>'
+                f'<div class="stt-now-row-line"></div>'
+                f'</div>'
+            )
+    except Exception:
+        pass
+
+    # HTML de la fila visual con CSS adicional para la línea AHORA en fila
+    extra_css = '''
+    <style>
+    .stt-now-row-overlay {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        pointer-events: none;
+        z-index: 10;
+    }
+    .stt-now-row-line {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 1.5px;
+        background: #0A0A0A;
+    }
+    .stt-now-row-badge {
+        position: absolute;
+        top: -2px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #0A0A0A;
+        color: #FFFFFF;
+        padding: 3px 9px;
+        border-radius: 3px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        white-space: nowrap;
+    }
+    .stt-row-container {
+        position: relative;
+    }
+    /* La línea AHORA solo cubre el área del track (no la columna del nombre) */
+    .stt-row-container .stt-now-row-overlay {
+        left: var(--ahora-left, 0%);
+    }
+    </style>
+    '''
+
+    row_html_inner = render_employee_timeline_row(
+        emp, status_data, "", TIMELINE_START_HOUR, TIMELINE_END_HOUR,
+    )
+
+    # Envolver para que la línea AHORA se posicione SOLO sobre el track
+    # Truco: poner el overlay como hermano del track, con margin-left que coincida con ancho del bloque info
+    full_row_html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        + DASHBOARD_CSS + extra_css +
+        '</head><body style="margin:0;padding:0;background:transparent;">'
+        '<div class="stt-wrap">'
+        '<div class="stt-country-card" style="border-top:0;border-radius:0;'
+        'border-bottom:0;padding-top:0;padding-bottom:0;">'
+        '<div style="position:relative;">'
+        + row_html_inner +
+        (f'<div style="position:absolute;top:0;bottom:0;left:220px;right:22px;'
+         f'pointer-events:none;"><div style="position:relative;height:100%;margin-left:22px;">'
+         f'{now_overlay_html}</div></div>') if now_overlay_html else ''
+        + '</div>'
+        '</div></div></body></html>'
+    )
+
+    components.html(full_row_html, height=92, scrolling=False)
+
+    # ============================================================
+    # EXPANDER NATIVO DEBAJO DE ESTA FILA — aquí es donde Pablo lo quiere
+    # ============================================================
+    active_inc = status_data.get("active_incident")
+
+    if active_inc:
+        # Mostrar info de la incidencia activa + botón para cerrarla con hora fin manual
+        inc_color = active_inc["color"]
+        inc_label = active_inc["label"]
+        inc_icon = active_inc["icon"]
+        inc_hi = active_inc["hora_inicio"]
+        inc_dur = active_inc["duration_str"]
+
+        with st.expander(
+            f"🚨 {emp_name} tiene incidencia ACTIVA: {inc_icon} {inc_label} · desde {inc_hi} · {inc_dur}",
+            expanded=False,
+        ):
+            st.caption(f"Cerrar incidencia indicando la hora de fin:")
+            col_t, col_b = st.columns([2, 1])
+
+            # Buscar el ID de la incidencia activa
+            from core.incidents import get_active_incident_for_employee
+            inc_obj = get_active_incident_for_employee(emp_id)
+            inc_id = inc_obj.get("id", "") if inc_obj is not None else ""
+
+            with col_t:
+                hora_fin_close = st.time_input(
+                    "Hora fin",
+                    value=now_gt().time().replace(second=0, microsecond=0),
+                    step=300,
+                    key=f"rowclose_time_{emp_id}",
+                )
+            with col_b:
+                st.markdown("<div style='padding-top:28px;'></div>", unsafe_allow_html=True)
+                if st.button("✓ Cerrar", key=f"rowclose_btn_{emp_id}", use_container_width=True, type="primary"):
+                    try:
+                        result = close_incident(
+                            inc_id, current_user_display_name(),
+                            hora_fin=hora_fin_close,
+                        )
+                        if result["success"]:
+                            notify_success(
+                                f"{emp_name} volvió. Duración: {format_duration(result['duration_minutes'])}",
+                                title="Incidencia cerrada"
+                            )
+                            st.rerun()
+                        else:
+                            notify_error(result["message"])
+                    except Exception as e:
+                        notify_error(str(e))
+    else:
+        # Expander para REGISTRAR nueva incidencia
+        with st.expander(f"🚨 Registrar incidencia para {emp_name}", expanded=False):
             now_t = now_gt().time().replace(second=0, microsecond=0)
 
             col_tipo, col_hi, col_hf = st.columns([2, 1, 1])
@@ -1225,18 +1219,11 @@ def _render_per_employee_incidents(statuses):
             )
 
             # Vista previa de duración calculada
-            from core.incidents import calculate_duration_minutes
             preview_min = calculate_duration_minutes(hora_inicio, hora_fin)
             if preview_min > 0:
-                st.markdown(
-                    f'<div style="background:#F0FDF4;border-left:3px solid #16A34A;'
-                    f'padding:8px 14px;border-radius:0 4px 4px 0;font-size:12px;color:#15803D;'
-                    f'margin:8px 0;">Duración calculada: <strong>{format_duration(preview_min)}</strong> '
-                    f'({preview_min} min)</div>',
-                    unsafe_allow_html=True,
-                )
-            elif preview_min <= 0:
-                st.caption("⚠ La hora fin debe ser posterior a la hora inicio.")
+                st.success(f"Duración calculada: {format_duration(preview_min)} ({preview_min} min)")
+            else:
+                st.warning("La hora fin debe ser posterior a la hora inicio.")
 
             if st.button(
                 f"Registrar incidencia para {emp_name}",
