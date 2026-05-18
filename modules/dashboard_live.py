@@ -295,7 +295,12 @@ body {
     top: 0;
     bottom: 0;
     width: 1px;
-    background: #F1F5F9;
+    background: #E2E8F0;
+    pointer-events: none;
+}
+.stt-track-grid-emphasis {
+    background: #94A3B8;
+    width: 1px;
 }
 
 /* Segments */
@@ -1033,21 +1038,21 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
         _render_employee_row_with_form(s)
 
 
+
 def _render_employee_row_with_form(status_data: dict):
     """
-    Una fila de empleado:
-    - Bloque visual (iframe): nombre, avatar, segmentos del horario, línea AHORA si aplica
-    - Debajo: expander de Streamlit con formulario de incidencia
+    Fila completa de empleado:
+    - Columna izquierda (95% ancho): iframe con la fila visual (nombre, avatar, segmentos, AHORA)
+    - Columna derecha (5% ancho): botón 🚨 nativo de Streamlit
+    Click en 🚨 → abre dialog popup con el form de incidencia.
     """
     from core.incidents import calculate_duration_minutes
     from datetime import time as _t
+    from core.time_utils import parse_time as _parse_time
 
     emp = status_data["employee"]
     emp_id = int(emp["id"])
     emp_name = emp["nombre"]
-    pais = emp.get("pais", "")
-    rol = emp.get("rol", "")
-    flag_uc = flag_emoji_unicode(pais)
 
     # Overlay de "AHORA" en esta fila (línea vertical)
     now_overlay_html = ""
@@ -1057,197 +1062,180 @@ def _render_employee_row_with_form(status_data: dict):
             from core.time_utils import time_to_position_pct
             pct = time_to_position_pct(nt, _t(TIMELINE_START_HOUR, 0), _t(TIMELINE_END_HOUR, 0))
             now_overlay_html = (
-                f'<div class="stt-now-row-overlay" style="left:{pct}%;">'
-                f'<div class="stt-now-row-badge">AHORA · {nt.strftime("%I:%M %p").lstrip("0")}</div>'
-                f'<div class="stt-now-row-line"></div>'
-                f'</div>'
+                f'<div style="position:absolute;top:0;bottom:0;left:220px;right:22px;'
+                f'pointer-events:none;z-index:20;">'
+                f'<div style="position:relative;height:100%;margin-left:22px;">'
+                f'<div style="position:absolute;top:0;bottom:0;left:{pct}%;'
+                f'width:1.5px;background:#0A0A0A;">'
+                f'<div style="position:absolute;top:-2px;left:50%;transform:translateX(-50%);'
+                f'background:#0A0A0A;color:#FFF;padding:3px 9px;border-radius:3px;'
+                f"font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;"
+                f'letter-spacing:1px;white-space:nowrap;">'
+                f'AHORA · {nt.strftime("%I:%M %p").lstrip("0")}</div>'
+                f'</div></div></div>'
             )
     except Exception:
         pass
-
-    # HTML de la fila visual con CSS adicional para la línea AHORA en fila
-    extra_css = '''
-    <style>
-    .stt-now-row-overlay {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        pointer-events: none;
-        z-index: 10;
-    }
-    .stt-now-row-line {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        width: 1.5px;
-        background: #0A0A0A;
-    }
-    .stt-now-row-badge {
-        position: absolute;
-        top: -2px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: #0A0A0A;
-        color: #FFFFFF;
-        padding: 3px 9px;
-        border-radius: 3px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 1px;
-        white-space: nowrap;
-    }
-    .stt-row-container {
-        position: relative;
-    }
-    /* La línea AHORA solo cubre el área del track (no la columna del nombre) */
-    .stt-row-container .stt-now-row-overlay {
-        left: var(--ahora-left, 0%);
-    }
-    </style>
-    '''
 
     row_html_inner = render_employee_timeline_row(
         emp, status_data, "", TIMELINE_START_HOUR, TIMELINE_END_HOUR,
     )
 
-    # Envolver para que la línea AHORA se posicione SOLO sobre el track
-    # Truco: poner el overlay como hermano del track, con margin-left que coincida con ancho del bloque info
     full_row_html = (
         '<!DOCTYPE html><html><head><meta charset="UTF-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-        + DASHBOARD_CSS + extra_css +
+        + DASHBOARD_CSS +
         '</head><body style="margin:0;padding:0;background:transparent;">'
         '<div class="stt-wrap">'
         '<div class="stt-country-card" style="border-top:0;border-radius:0;'
-        'border-bottom:0;padding-top:0;padding-bottom:0;">'
+        'border-bottom:0;padding-top:0;padding-bottom:0;margin:0;">'
         '<div style="position:relative;">'
-        + row_html_inner +
-        (f'<div style="position:absolute;top:0;bottom:0;left:220px;right:22px;'
-         f'pointer-events:none;"><div style="position:relative;height:100%;margin-left:22px;">'
-         f'{now_overlay_html}</div></div>') if now_overlay_html else ''
-        + '</div>'
+        + row_html_inner + now_overlay_html +
+        '</div>'
         '</div></div></body></html>'
     )
 
-    components.html(full_row_html, height=92, scrolling=False)
+    # Columnas: 1 grande para el iframe + 1 pequeña para el botón
+    col_row, col_btn = st.columns([20, 1])
 
-    # ============================================================
-    # EXPANDER NATIVO DEBAJO DE ESTA FILA — aquí es donde Pablo lo quiere
-    # ============================================================
-    active_inc = status_data.get("active_incident")
+    with col_row:
+        components.html(full_row_html, height=92, scrolling=False)
 
-    if active_inc:
-        # Mostrar info de la incidencia activa + botón para cerrarla con hora fin manual
-        inc_color = active_inc["color"]
-        inc_label = active_inc["label"]
-        inc_icon = active_inc["icon"]
-        inc_hi = active_inc["hora_inicio"]
-        inc_dur = active_inc["duration_str"]
-
-        with st.expander(
-            f"🚨 {emp_name} tiene incidencia ACTIVA: {inc_icon} {inc_label} · desde {inc_hi} · {inc_dur}",
-            expanded=False,
+    with col_btn:
+        st.markdown("<div style='padding-top:30px;'></div>", unsafe_allow_html=True)
+        if st.button(
+            "🚨",
+            key=f"open_dialog_{emp_id}",
+            help=f"Registrar incidencia para {emp_name}",
         ):
-            st.caption(f"Cerrar incidencia indicando la hora de fin:")
-            col_t, col_b = st.columns([2, 1])
+            st.session_state[f"show_dialog_{emp_id}"] = True
 
-            # Buscar el ID de la incidencia activa
-            from core.incidents import get_active_incident_for_employee
-            inc_obj = get_active_incident_for_employee(emp_id)
-            inc_id = inc_obj.get("id", "") if inc_obj is not None else ""
+    # ============================================================
+    # DIALOG POPUP: solo si el botón fue clickeado
+    # ============================================================
+    if st.session_state.get(f"show_dialog_{emp_id}"):
+        _show_incident_dialog(emp_id, emp_name, status_data)
 
-            with col_t:
-                hora_fin_close = st.time_input(
-                    "Hora fin",
-                    value=now_gt().time().replace(second=0, microsecond=0),
-                    step=300,
-                    key=f"rowclose_time_{emp_id}",
+
+@st.dialog("Registrar incidencia", width="large")
+def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
+    """
+    Dialog popup nativo de Streamlit.
+    Campos: tipo, hora inicio (texto), hora fin (texto), nota.
+    Las horas se escriben directo con teclado: 07:15, 7:15, 715, etc.
+    """
+    from core.incidents import calculate_duration_minutes
+    from core.time_utils import parse_time as _parse_time, current_time_gt
+
+    st.markdown(f"### 🚨 Incidencia para **{emp_name}**")
+
+    # Mostrar incidencias activas si las hay
+    active_inc = status_data.get("active_incident")
+    if active_inc:
+        st.warning(
+            f"⚠️ {emp_name} ya tiene una incidencia ACTIVA: "
+            f"{active_inc['icon']} {active_inc['label']} desde {active_inc['hora_inicio']}. "
+            f"Ciérrala primero o registra una nueva CERRADA con hora fin."
+        )
+
+    # Selector de tipo
+    tipo = st.selectbox(
+        "Tipo de incidencia",
+        options=INCIDENT_TYPES,
+        format_func=lambda x: f"{INCIDENT_ICONS.get(x, '?')}  {INCIDENT_LABELS.get(x, x)}",
+        key=f"dlg_tipo_{emp_id}",
+    )
+
+    now_hhmm = current_time_gt().strftime("%H:%M")
+
+    # CAMPOS DE TEXTO EDITABLES PARA LAS HORAS
+    col_hi, col_hf = st.columns(2)
+    with col_hi:
+        hi_str = st.text_input(
+            "Hora inicio (HH:MM)",
+            value=now_hhmm,
+            max_chars=8,
+            placeholder="07:15",
+            key=f"dlg_hi_{emp_id}",
+            help="Escribe la hora en formato 24h. Ej: 07:15, 13:45",
+        )
+    with col_hf:
+        hf_str = st.text_input(
+            "Hora fin (HH:MM)",
+            value=now_hhmm,
+            max_chars=8,
+            placeholder="08:00",
+            key=f"dlg_hf_{emp_id}",
+            help="Escribe la hora en formato 24h. Ej: 08:00, 14:30",
+        )
+
+    # Validar formato en vivo
+    hi_parsed = _parse_time(hi_str)
+    hf_parsed = _parse_time(hf_str)
+
+    if hi_str and not hi_parsed:
+        st.error(f"❌ Hora inicio inválida: '{hi_str}'. Usa formato HH:MM (ej. 07:15)")
+    if hf_str and not hf_parsed:
+        st.error(f"❌ Hora fin inválida: '{hf_str}'. Usa formato HH:MM (ej. 08:00)")
+
+    nota = st.text_input(
+        "Nota (opcional)",
+        placeholder="Ej: Reportado por WhatsApp",
+        max_chars=200,
+        key=f"dlg_nota_{emp_id}",
+    )
+
+    # Vista previa de duración
+    if hi_parsed and hf_parsed:
+        preview_min = calculate_duration_minutes(hi_parsed, hf_parsed)
+        if preview_min > 0:
+            st.success(f"✅ Duración calculada: **{format_duration(preview_min)}** ({preview_min} min)")
+        else:
+            st.warning("⚠️ La hora fin debe ser posterior a la hora inicio.")
+
+    st.divider()
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        if st.button("Cancelar", use_container_width=True, key=f"dlg_cancel_{emp_id}"):
+            st.session_state[f"show_dialog_{emp_id}"] = False
+            st.rerun()
+
+    with col_b:
+        submit_disabled = not (hi_parsed and hf_parsed)
+        if st.button(
+            "✓ Registrar",
+            use_container_width=True,
+            type="primary",
+            disabled=submit_disabled,
+            key=f"dlg_submit_{emp_id}",
+        ):
+            try:
+                result = register_incident(
+                    employee_id=emp_id,
+                    employee_name=emp_name,
+                    tipo=tipo,
+                    hora_inicio=hi_parsed,
+                    hora_fin=hf_parsed,
+                    nota=nota,
+                    registered_by=current_user_display_name(),
                 )
-            with col_b:
-                st.markdown("<div style='padding-top:28px;'></div>", unsafe_allow_html=True)
-                if st.button("✓ Cerrar", key=f"rowclose_btn_{emp_id}", use_container_width=True, type="primary"):
-                    try:
-                        result = close_incident(
-                            inc_id, current_user_display_name(),
-                            hora_fin=hora_fin_close,
-                        )
-                        if result["success"]:
-                            notify_success(
-                                f"{emp_name} volvió. Duración: {format_duration(result['duration_minutes'])}",
-                                title="Incidencia cerrada"
-                            )
-                            st.rerun()
-                        else:
-                            notify_error(result["message"])
-                    except Exception as e:
-                        notify_error(str(e))
-    else:
-        # Expander para REGISTRAR nueva incidencia
-        with st.expander(f"🚨 Registrar incidencia para {emp_name}", expanded=False):
-            now_t = now_gt().time().replace(second=0, microsecond=0)
-
-            col_tipo, col_hi, col_hf = st.columns([2, 1, 1])
-            with col_tipo:
-                tipo = st.selectbox(
-                    "Tipo de incidencia",
-                    options=INCIDENT_TYPES,
-                    format_func=lambda x: f"{INCIDENT_ICONS.get(x, '?')}  {INCIDENT_LABELS.get(x, x)}",
-                    key=f"row_inc_tipo_{emp_id}",
-                )
-            with col_hi:
-                hora_inicio = st.time_input(
-                    "Hora inicio",
-                    value=now_t,
-                    step=300,
-                    key=f"row_inc_hi_{emp_id}",
-                )
-            with col_hf:
-                hora_fin = st.time_input(
-                    "Hora fin",
-                    value=now_t,
-                    step=300,
-                    key=f"row_inc_hf_{emp_id}",
-                )
-
-            nota = st.text_input(
-                "Nota (opcional)",
-                placeholder="Ej: Reportado por WhatsApp",
-                max_chars=200,
-                key=f"row_inc_nota_{emp_id}",
-            )
-
-            # Vista previa de duración calculada
-            preview_min = calculate_duration_minutes(hora_inicio, hora_fin)
-            if preview_min > 0:
-                st.success(f"Duración calculada: {format_duration(preview_min)} ({preview_min} min)")
-            else:
-                st.warning("La hora fin debe ser posterior a la hora inicio.")
-
-            if st.button(
-                f"Registrar incidencia para {emp_name}",
-                use_container_width=True,
-                type="primary",
-                key=f"row_inc_submit_{emp_id}",
-            ):
-                try:
-                    result = register_incident(
-                        employee_id=emp_id,
-                        employee_name=emp_name,
-                        tipo=tipo,
-                        hora_inicio=hora_inicio,
-                        hora_fin=hora_fin,
-                        nota=nota,
-                        registered_by=current_user_display_name(),
+                if result["success"]:
+                    notify_success(
+                        f"{emp_name} · {INCIDENT_LABELS.get(tipo)} · {format_duration(result['duracion_min'])}",
+                        title="Incidencia registrada"
                     )
-                    if result["success"]:
-                        notify_success(
-                            f"{emp_name} · {INCIDENT_LABELS.get(tipo)} · {format_duration(result['duracion_min'])}",
-                            title="Incidencia registrada"
-                        )
-                        st.rerun()
-                    else:
-                        notify_error(result["message"])
-                except Exception as e:
-                    notify_error(str(e))
+                    # Cerrar dialog e invalidar cache para refrescar el timeline
+                    st.session_state[f"show_dialog_{emp_id}"] = False
+                    from core.sheets import invalidate_cache
+                    invalidate_cache()
+                    st.rerun()
+                else:
+                    notify_error(result["message"])
+            except Exception as e:
+                notify_error(str(e))
+
+
+def _show_incident_dialog(emp_id: int, emp_name: str, status_data: dict):
+    """Wrapper. Streamlit dialog API."""
+    _show_incident_dialog_impl(emp_id, emp_name, status_data)
