@@ -976,12 +976,49 @@ def render_employee_timeline_row(
             label = inc.get("label", "").upper()
             is_active = str(inc.get("estado", "")).upper() == "ACTIVA"
             border_style = "1.5px solid " + color
-            # Si está ACTIVA, agregar animación pulsante con borde más grueso
             if is_active:
                 border_style = "2px solid " + color
 
+            # Calcular duración para el tooltip
+            from core.incidents import calculate_duration_minutes, format_duration
+            dur_min = 0
+            if hi and hf:
+                dur_min = calculate_duration_minutes(hi, hf)
+            dur_str = format_duration(dur_min) if dur_min > 0 else "—"
+
+            # Strings para el tooltip
+            hi_display = hi.strftime("%H:%M") if hi else "?"
+            hf_display = hf.strftime("%H:%M") if hf else "ahora"
+            label_pretty = inc.get("label", "")
+            nota = inc.get("nota", "") or ""
+            estado_pretty = "ACTIVA · en curso" if is_active else "Cerrada"
+
+            # Tooltip nativo HTML (atributo title) — funciona en TODOS los navegadores
+            tooltip_lines = [
+                f"{inc.get('icon', '')} {label_pretty}",
+                f"Inicio: {hi_display}",
+                f"Fin: {hf_display}",
+                f"Duración: {dur_str}",
+                f"Estado: {estado_pretty}",
+            ]
+            if nota:
+                tooltip_lines.append(f"Nota: {nota}")
+            tooltip_text = "\n".join(tooltip_lines).replace('"', "&quot;")
+
+            # Tooltip custom CSS con data-attributes (más bonito)
+            data_attrs = (
+                f'data-inc-icon="{inc.get("icon", "")}" '
+                f'data-inc-label="{label_pretty}" '
+                f'data-inc-hi="{hi_display}" '
+                f'data-inc-hf="{hf_display}" '
+                f'data-inc-dur="{dur_str}" '
+                f'data-inc-estado="{estado_pretty}"'
+            )
+
             overlays_html_parts.append(
                 f'<div class="stt-incident-overlay" '
+                f'title="{tooltip_text}" '
+                f'{data_attrs} '
                 f'style="left:{start_pct}%; width:{width}%; '
                 f'background:repeating-linear-gradient(45deg, {color}, '
                 f'{color} 6px, {color}DD 6px, {color}DD 12px); '
@@ -989,6 +1026,14 @@ def render_employee_timeline_row(
                 f'<span class="stt-incident-label">'
                 f'{icon} {label}'
                 f'</span>'
+                f'<div class="stt-incident-tooltip">'
+                f'<div class="stt-tt-title">{inc.get("icon", "")} {label_pretty}</div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Inicio:</span> <span class="stt-tt-v">{hi_display}</span></div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Fin:</span> <span class="stt-tt-v">{hf_display}</span></div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Duración:</span> <span class="stt-tt-v stt-tt-dur">{dur_str}</span></div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Estado:</span> <span class="stt-tt-v">{estado_pretty}</span></div>'
+                + (f'<div class="stt-tt-note">{nota}</div>' if nota else '') +
+                f'</div>'
                 f'</div>'
             )
         except Exception:
