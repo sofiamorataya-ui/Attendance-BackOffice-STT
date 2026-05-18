@@ -147,6 +147,11 @@ WORKSHEET_HEADERS = {
     "Usuarios": [
         "username", "password_hash", "nombre_completo", "rol", "activo",
     ],
+    "Incidencias": [
+        "id", "fecha", "empleado_id", "empleado_nombre", "tipo",
+        "hora_inicio", "hora_fin", "duracion_minutos", "nota",
+        "registrado_por", "cerrado_por", "estado", "timestamp",
+    ],
 }
 
 
