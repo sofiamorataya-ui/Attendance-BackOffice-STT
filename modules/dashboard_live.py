@@ -1178,20 +1178,142 @@ def _render_employee_row_with_form(status_data: dict):
     with col_row:
         components.html(full_row_html, height=140, scrolling=False)
 
+    active_inc = status_data.get("active_incident")
+
     with col_btn:
         st.markdown("<div style='padding-top:55px;'></div>", unsafe_allow_html=True)
-        button_clicked = st.button(
-            "🚨",
-            key=f"open_dialog_{emp_id}",
-            help=f"Registrar incidencia para {emp_name}",
-        )
+        if active_inc:
+            # Hay incidencia ACTIVA → botón "■" para terminarla
+            button_clicked_terminate = st.button(
+                "■",
+                key=f"terminate_{emp_id}",
+                help=f"Terminar incidencia activa de {emp_name}",
+                type="primary",
+            )
+            button_clicked_open = False
+        else:
+            button_clicked_open = st.button(
+                "🚨",
+                key=f"open_dialog_{emp_id}",
+                help=f"Registrar incidencia para {emp_name}",
+            )
+            button_clicked_terminate = False
 
     # ============================================================
-    # DIALOG POPUP: SOLO si el botón fue presionado EN ESTE rerun
-    # (no se mantiene en session_state entre auto-refreshes)
+    # ABRIR DIALOG SEGÚN BOTÓN PRESIONADO
     # ============================================================
-    if button_clicked:
+    if button_clicked_open:
         _show_incident_dialog(emp_id, emp_name, status_data)
+    if button_clicked_terminate:
+        _show_terminate_dialog(emp_id, emp_name, status_data, active_inc)
+
+
+@st.dialog("Terminar incidencia activa", width="large")
+def _show_terminate_dialog_impl(emp_id: int, emp_name: str, status_data: dict, active_inc: dict):
+    """Dialog para cerrar una incidencia activa con hora fin manual o ahora."""
+    from core.incidents import calculate_duration_minutes, close_incident, get_active_incident_for_employee
+    from core.time_utils import parse_time as _parse_time, current_time_gt
+
+    st.markdown(f"### ■ Terminar incidencia de **{emp_name}**")
+
+    if not active_inc:
+        st.error("No se encontró la incidencia activa.")
+        return
+
+    icon = active_inc.get("icon", "❓")
+    label = active_inc.get("label", "")
+    color = active_inc.get("color", "#F97316")
+    hi = active_inc.get("hora_inicio", "")
+    dur = active_inc.get("duration_str", "")
+
+    st.markdown(
+        f'<div style="background:{color}15;border-left:4px solid {color};'
+        f'padding:14px 18px;border-radius:0 6px 6px 0;margin:8px 0 16px 0;">'
+        f'<div style="font-size:14px;color:#0A0A0A;">'
+        f'<strong>{icon} {label}</strong> · Iniciada a las {hi} · '
+        f'<strong style="color:{color};">{dur}</strong> en curso'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    now_hhmm = current_time_gt().strftime("%H:%M")
+
+    # Botón "Terminar AHORA"
+    if st.button(
+        f"■  Terminar AHORA ({now_hhmm})",
+        use_container_width=True,
+        type="primary",
+        key=f"term_now_{emp_id}",
+    ):
+        try:
+            inc_obj = get_active_incident_for_employee(emp_id)
+            if inc_obj is None:
+                notify_error("La incidencia ya no existe.")
+                return
+            inc_id = inc_obj.get("id", "")
+            result = close_incident(inc_id, current_user_display_name(), hora_fin=current_time_gt())
+            if result["success"]:
+                notify_success(
+                    f"{emp_name} volvió. Duración: {format_duration(result['duration_minutes'])}",
+                    title="Incidencia cerrada"
+                )
+                from core.sheets import invalidate_cache
+                invalidate_cache()
+                st.rerun()
+            else:
+                notify_error(result["message"])
+        except Exception as e:
+            notify_error(str(e))
+
+    st.caption("— O terminar con hora fin manual —")
+
+    hf_str = st.text_input(
+        "Hora fin (HH:MM)",
+        value=now_hhmm,
+        max_chars=8,
+        placeholder="08:00",
+        key=f"term_hf_{emp_id}",
+    )
+    hf_parsed = _parse_time(hf_str)
+    if hf_str and not hf_parsed:
+        st.error(f"❌ Hora inválida: '{hf_str}'")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("Cancelar", use_container_width=True, key=f"term_cancel_{emp_id}"):
+            st.rerun()
+    with col_b:
+        if st.button(
+            "✓ Terminar con esta hora",
+            use_container_width=True,
+            type="primary",
+            disabled=not hf_parsed,
+            key=f"term_submit_{emp_id}",
+        ):
+            try:
+                inc_obj = get_active_incident_for_employee(emp_id)
+                if inc_obj is None:
+                    notify_error("La incidencia ya no existe.")
+                    return
+                inc_id = inc_obj.get("id", "")
+                result = close_incident(inc_id, current_user_display_name(), hora_fin=hf_parsed)
+                if result["success"]:
+                    notify_success(
+                        f"{emp_name} terminó {hf_parsed.strftime('%H:%M')}. Duración: {format_duration(result['duration_minutes'])}",
+                        title="Incidencia cerrada"
+                    )
+                    from core.sheets import invalidate_cache
+                    invalidate_cache()
+                    st.rerun()
+                else:
+                    notify_error(result["message"])
+            except Exception as e:
+                notify_error(str(e))
+
+
+def _show_terminate_dialog(emp_id: int, emp_name: str, status_data: dict, active_inc: dict):
+    """Wrapper."""
+    _show_terminate_dialog_impl(emp_id, emp_name, status_data, active_inc)
 
 
 @st.dialog("Registrar incidencia", width="large")
@@ -1271,6 +1393,42 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
             st.warning("⚠️ La hora fin debe ser posterior a la hora inicio.")
 
     st.divider()
+
+    # ============================================================
+    # BOTÓN: ▶ INICIAR AHORA (sin hora fin, queda ACTIVA)
+    # ============================================================
+    if not active_inc:  # Solo si NO hay incidencia activa
+        if st.button(
+            f"▶  Iniciar AHORA ({current_time_gt().strftime('%H:%M')})  ·  sin hora fin (queda activa)",
+            use_container_width=True,
+            key=f"dlg_start_now_{emp_id}",
+            help="Inicia una incidencia con la hora actual. Después la cierras con 'Terminar'.",
+        ):
+            try:
+                result = register_incident(
+                    employee_id=emp_id,
+                    employee_name=emp_name,
+                    tipo=tipo,
+                    hora_inicio=current_time_gt(),
+                    hora_fin=None,  # ACTIVA
+                    nota=nota,
+                    registered_by=current_user_display_name(),
+                )
+                if result["success"]:
+                    notify_success(
+                        f"{emp_name} · {INCIDENT_LABELS.get(tipo)} · iniciada a las {current_time_gt().strftime('%H:%M')}",
+                        title="Incidencia activa"
+                    )
+                    from core.sheets import invalidate_cache
+                    invalidate_cache()
+                    st.rerun()
+                else:
+                    notify_error(result["message"])
+            except Exception as e:
+                notify_error(str(e))
+
+        st.caption("— O registrar con hora fin manual (cerrada) —")
+
     col_a, col_b = st.columns(2)
 
     with col_a:
@@ -1280,7 +1438,7 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
     with col_b:
         submit_disabled = not (hi_parsed and hf_parsed)
         if st.button(
-            "✓ Registrar",
+            "✓ Registrar (con hora fin)",
             use_container_width=True,
             type="primary",
             disabled=submit_disabled,
@@ -1301,7 +1459,6 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
                         f"{emp_name} · {INCIDENT_LABELS.get(tipo)} · {format_duration(result['duracion_min'])}",
                         title="Incidencia registrada"
                     )
-                    # Invalidar cache para refrescar el timeline con la nueva incidencia
                     from core.sheets import invalidate_cache
                     invalidate_cache()
                     st.rerun()
