@@ -1,4 +1,3 @@
-
 """
 modules/birthdays.py
 Cumpleaños del equipo con countdown.
