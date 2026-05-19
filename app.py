@@ -11,7 +11,8 @@ from core.auth import (
 from modules import (
     dashboard_live, admin_seed, attendance_log, overtime,
     vacations, exceptions, holidays, birthdays, tenure, employees,
-    incidents_history,
+    incidents_history, feedback_reports, feedback_process,
+    feedback_signature_view,
 )
 
 
@@ -26,6 +27,15 @@ st.set_page_config(
 )
 
 inject_css()
+
+
+# ============================================================
+# INTERCEPTOR DE URL: VISTA PÚBLICA DE FIRMA
+# Si la URL tiene ?feedback=XYZ, no requiere login.
+# ============================================================
+if feedback_signature_view.is_signature_view():
+    feedback_signature_view.render_signature_view()
+    st.stop()
 
 
 # ============================================================
@@ -177,6 +187,8 @@ def render_sidebar():
             "🇺🇸 Feriados US": "holidays",
             "🎂 Cumpleaños": "birthdays",
             "📅 Antigüedad": "tenure",
+            "🧠 Resolución de Dudas": "feedback_reports",
+            "📝 Feedback Process": "feedback_process",
             "👥 Empleados": "employees",
             "🛠️ Setup Inicial": "admin_seed",
         }
@@ -234,6 +246,8 @@ def route():
         "holidays": "FERIADOS · US",
         "birthdays": "CUMPLEAÑOS",
         "tenure": "ANTIGÜEDAD",
+        "feedback_reports": "RESOLUCIÓN DE DUDAS",
+        "feedback_process": "FEEDBACK PROCESS",
         "employees": "EMPLEADOS",
         "admin_seed": "SETUP · ADMINISTRADOR",
     }
@@ -267,6 +281,10 @@ def route():
         employees.render()
     elif module == "incidents_history":
         incidents_history.render()
+    elif module == "feedback_reports":
+        feedback_reports.render()
+    elif module == "feedback_process":
+        feedback_process.render()
     else:
         from core.ui import render_page_title
         render_page_title(eyebrow="MÓDULO", title="No encontrado")
