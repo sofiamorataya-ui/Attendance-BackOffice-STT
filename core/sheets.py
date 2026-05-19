@@ -152,6 +152,21 @@ WORKSHEET_HEADERS = {
         "hora_inicio", "hora_fin", "duracion_minutos", "nota",
         "registrado_por", "cerrado_por", "estado", "timestamp",
     ],
+    "Reportes_Dudas": [
+        "id", "fecha", "titulo", "autor",
+        "dudas_json", "observaciones", "feedbacks_json", "reminders_json",
+        "timestamp",
+    ],
+    "Feedback_Process": [
+        "id", "fecha", "empleado_id", "empleado_nombre", "posicion", "departamento",
+        "manager", "tipo_feedback", "area_feedback", "area_otro",
+        "descripcion_situacion", "feedback_dado", "comportamiento_esperado",
+        "accion_empleado", "apoyo_manager", "fecha_seguimiento",
+        "empleado_acknowledged", "comentario_empleado",
+        "followup_required", "followup_date", "followup_notes",
+        "estado_firma", "fecha_firma", "comentario_firma", "ip_firma",
+        "timestamp_creacion", "timestamp_modificacion",
+    ],
 }
 
 
