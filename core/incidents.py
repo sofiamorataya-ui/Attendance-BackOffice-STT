@@ -80,47 +80,58 @@ def register_incident(
     employee_name: str,
     tipo: str,
     hora_inicio: time,
-    hora_fin: time,
+    hora_fin: Optional[time],
     nota: str,
     registered_by: str,
     fecha_incidencia: Optional[date] = None,
 ) -> dict:
     """
-    Registra una incidencia con hora inicio y fin manuales.
-    Calcula la duración automáticamente.
+    Registra una incidencia.
+
+    Si hora_fin se pasa: queda CERRADA (con duración calculada).
+    Si hora_fin es None: queda ACTIVA (en curso, sin duración aún).
 
     Args:
-        employee_id: ID del empleado
-        employee_name: Nombre del empleado
-        tipo: SIN_LUZ, BREAK, etc.
-        hora_inicio: Hora de inicio (obligatoria)
-        hora_fin: Hora de fin (obligatoria)
-        nota: Observación opcional
-        registered_by: Quién la registra
-        fecha_incidencia: Fecha (default hoy)
-
-    Returns:
-        dict: {success, message, incident_id, duracion_min}
+        hora_inicio: Obligatoria
+        hora_fin: Opcional. None → incidencia ACTIVA
     """
     if not hora_inicio:
         return {"success": False, "message": "La hora de inicio es obligatoria.", "incident_id": None}
-    if not hora_fin:
-        return {"success": False, "message": "La hora de fin es obligatoria.", "incident_id": None}
 
-    # Validar que hora_fin > hora_inicio
-    if time_to_minutes(hora_fin) <= time_to_minutes(hora_inicio):
+    fecha = fecha_incidencia or today_gt()
+
+    # Si NO hay hora_fin, verificar que no exista otra activa
+    if not hora_fin:
+        existing = get_active_incident_for_employee(employee_id, fecha)
+        if existing is not None:
+            return {
+                "success": False,
+                "message": f"{employee_name} ya tiene una incidencia activa. Ciérrala primero.",
+                "incident_id": None,
+            }
+
+    # Si hay hora_fin, validar
+    if hora_fin and time_to_minutes(hora_fin) <= time_to_minutes(hora_inicio):
         return {
             "success": False,
             "message": "La hora fin debe ser posterior a la hora de inicio.",
             "incident_id": None,
         }
 
-    fecha = fecha_incidencia or today_gt()
-    duracion_min = calculate_duration_minutes(hora_inicio, hora_fin)
-
     now = now_gt()
     incident_id = f"INC-{now.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    if hora_fin:
+        estado = "CERRADA"
+        duracion_min = calculate_duration_minutes(hora_inicio, hora_fin)
+        cerrado_por = registered_by
+        hora_fin_str = hora_fin.strftime("%H:%M")
+    else:
+        estado = "ACTIVA"
+        duracion_min = ""
+        cerrado_por = ""
+        hora_fin_str = ""
 
     row = [
         incident_id,
@@ -129,22 +140,28 @@ def register_incident(
         employee_name,
         tipo,
         hora_inicio.strftime("%H:%M"),
-        hora_fin.strftime("%H:%M"),
+        hora_fin_str,
         duracion_min,
         nota.strip(),
         registered_by,
-        registered_by,           # cerrado_por = mismo que registró
-        "CERRADA",
+        cerrado_por,
+        estado,
         timestamp,
     ]
     append_row(WS_INCIDENTS, row)
     invalidate_cache()
 
+    if estado == "CERRADA":
+        msg = f"Incidencia registrada y cerrada para {employee_name} ({format_duration(duracion_min)})."
+    else:
+        msg = f"Incidencia ACTIVA iniciada para {employee_name} a las {hora_inicio.strftime('%H:%M')}."
+
     return {
         "success": True,
-        "message": f"Incidencia registrada para {employee_name} ({format_duration(duracion_min)}).",
+        "message": msg,
         "incident_id": incident_id,
-        "duracion_min": duracion_min,
+        "duracion_min": duracion_min if isinstance(duracion_min, int) else 0,
+        "estado": estado,
     }
 
 
