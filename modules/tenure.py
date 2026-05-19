@@ -1,4 +1,3 @@
-
 """
 modules/tenure.py
 Antigüedad en la empresa de cada empleado.
