@@ -264,11 +264,14 @@ def _render_register_form(employees_active: pd.DataFrame):
                         motivo, current_user_display_name(), timestamp, "FALSE",
                     ]
                     append_row(WS_OVERTIME, row)
+                    from core.sheets import invalidate_cache
+                    invalidate_cache()
                     notify_success(
                         f"{horas}h registradas para {selected['nombre']} · "
                         f"{fecha_ot.strftime('%d/%m/%Y')}",
                         title="Horas extras registradas"
                     )
+                    st.rerun()
                 except Exception as e:
                     notify_error(str(e))
 
