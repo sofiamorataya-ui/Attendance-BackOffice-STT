@@ -1,4 +1,3 @@
-
 """
 modules/vacations.py
 Sistema de Vacaciones:
