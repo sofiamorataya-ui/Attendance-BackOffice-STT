@@ -1,4 +1,3 @@
-
 """
 modules/holidays.py
 Feriados de Estados Unidos con asignación de coverage por empleado.
@@ -189,11 +188,23 @@ def render():
         </div>
         ''')
 
+    import streamlit.components.v1 as components
+
     grid_html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        '<style>'
+        'body{margin:0;padding:0;font-family:"Inter Tight",sans-serif;background:transparent;}'
+        '</style></head><body>'
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));'
-        f'gap:12px;margin-bottom:24px;">{"".join(cards_html)}</div>'
+        f'gap:12px;">{"".join(cards_html)}</div>'
+        '</body></html>'
     )
-    st.markdown(grid_html, unsafe_allow_html=True)
+    # Altura dinámica según cantidad de feriados (cards de ~180px, 4 columnas aprox)
+    n_holidays = len(cards_html)
+    cols_per_row_estimate = 4
+    rows_estimate = (n_holidays + cols_per_row_estimate - 1) // cols_per_row_estimate
+    grid_height = rows_estimate * 200 + 40
+    components.html(grid_html, height=grid_height, scrolling=False)
 
     # ============================================================
     # FORMULARIO DE ASIGNACIÓN
