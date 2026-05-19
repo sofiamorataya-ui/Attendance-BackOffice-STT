@@ -8,6 +8,7 @@ import pytz
 # IDENTIDAD DE LA APP
 # ============================================================
 APP_NAME = "Attendance BackOffice STT"
+APP_URL = "https://attendance-backoffice-stt.streamlit.app"  # Cambiar si la URL cambia
 APP_SHORT = "STT Attendance"
 APP_VERSION = "1.0.0"
 COMPANY = "STT Logistics Group"
@@ -100,10 +101,13 @@ WS_PERMITS = "Permisos"
 WS_HOLIDAYS = "Feriados"
 WS_USERS = "Usuarios"
 WS_INCIDENTS = "Incidencias"
+WS_FEEDBACK_REPORTS = "Reportes_Dudas"
+WS_FEEDBACK_PROCESS = "Feedback_Process"
 
 ALL_WORKSHEETS = [
     WS_EMPLOYEES, WS_SCHEDULES, WS_ATTENDANCE, WS_OVERTIME,
     WS_VACATIONS, WS_PERMITS, WS_HOLIDAYS, WS_USERS, WS_INCIDENTS,
+    WS_FEEDBACK_REPORTS, WS_FEEDBACK_PROCESS,
 ]
 
 # ============================================================
