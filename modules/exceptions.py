@@ -1,4 +1,3 @@
-
 """
 modules/exceptions.py
 Permisos y Ausencias (no vacaciones).
