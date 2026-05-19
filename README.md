@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/27972166/README.md)
+[README.md](https://github.com/user-attachments/files/28032314/README.md)
 # Attendance BackOffice STT
 
 Sistema integral de gestión de asistencia para el equipo BackOffice de STT Logistics Group.
@@ -7,54 +7,65 @@ Sistema integral de gestión de asistencia para el equipo BackOffice de STT Logi
 
 | Módulo | Descripción |
 |---|---|
-| **🟢 Asistencia en Vivo** | Timeline visual en tiempo real (auto-refresh 60s). Quién trabaja, en almuerzo, día libre o ausente. Línea "AHORA" móvil. Botón para registrar incidencias en vivo. |
-| **🚨 Incidencias** | Histórico y reportes de incidencias del turno (sin luz, sin internet, médico, etc.). Vista de activas con botón "Volvió" + tabla histórica con filtros + resumen por empleado. |
-| **📋 Registro Asistencia** | Excepciones (llegada tarde, salida temprano, ausente, permiso, incapacidad). El selector de hora calcula los minutos tarde automáticamente. |
-| **⏱️ Horas Extras** | Matriz mensual + formulario + detalle día/semana/mes. Sábados de Henry auto-inyectados (7h c/u). |
-| **🏖️ Vacaciones** | 15 días/empleado/año. Tomados, disponibles, acumulados (1.25 días/mes). |
-| **🚨 Permisos** | Personales, incapacidad, duelo, otros. Rango fechas, motivo, badge ACTIVO. |
-| **🇺🇸 Feriados US** | 13 feriados federales. Asignación de coverage. Badge HOY/PASADO/EN Xd. |
-| **🎂 Cumpleaños** | Hero card del próximo. Ordenado por proximidad. |
-| **📅 Antigüedad** | Tiempo en la empresa en vivo (años, meses, días). Badge 🌟 VETERANO si 3+ años. |
-| **👥 Empleados** | CRUD: directorio, crear, editar, configurar horarios semanales. |
-| **🛠️ Setup Inicial** | Wizard de 7 pasos para inicializar el Google Sheet la primera vez. |
+| **🟢 Asistencia en Vivo** | Timeline visual en tiempo real (auto-refresh 60s). Botón 🚨 por empleado para iniciar incidencias (puede iniciar AHORA → queda activa, o registrar con hora fin manual). Tooltip al hover con detalles. |
+| **🚨 Incidencias** | Histórico con filtros día/semana/mes/año. Rankings duales (cantidad y tiempo). Cerrar incidencias activas con hora fin manual o "ahora". |
+| **📋 Registro Asistencia** | Excepciones (llegada tarde, salida temprano, ausente, permiso, incapacidad). |
+| **⏱️ Horas Extras** | Matriz mensual + formulario + detalle día/semana/mes. Cache invalidado al registrar (los datos se reflejan inmediato). |
+| **🏖️ Vacaciones** | 15 días/empleado/año con acumulación proporcional. |
+| **🚦 Permisos** | Personales, incapacidad, duelo, otros. Badge ACTIVO si está vigente. |
+| **🇺🇸 Feriados US** | 13 feriados federales 2026. Cards con grid responsive (renderizado vía components.html para evitar fragmentación de Streamlit). |
+| **🎂 Cumpleaños** | Hero card del próximo con countdown. |
+| **📅 Antigüedad** | Tiempo en la empresa en tiempo real con badge VETERANO si ≥3 años. |
+| **🧠 Resolución de Dudas** ⭐ | NUEVO. Reportes estructurados al team (dudas, observaciones, feedbacks individuales, reminders generales). Descarga PDF con formato corporativo STT. |
+| **📝 Feedback Process** ⭐ | NUEVO. Replica el template DOCX corporativo. Genera link único por feedback que Sofi comparte por WhatsApp. El empleado abre el link sin login → lee → firma virtualmente → Sofi recibe la firma. Descarga PDF y DOCX del documento. |
+| **👥 Empleados** | CRUD completo con horarios semanales. |
+| **🛠️ Setup Inicial** | Wizard de 7 pasos para inicializar el Google Sheet. |
 
-## 🚀 Deploy en Streamlit Community Cloud
+## 🆕 Firma virtual (vista pública sin login)
 
-1. Subir todo el contenido del ZIP a GitHub (sobrescribiendo lo anterior)
-2. No olvides el archivo `.python-version` con `3.12`
-3. Verificar `secrets.toml` (variables raíz ANTES del bloque `[gcp_service_account]`)
-4. Reboot app en Streamlit Cloud
-5. Primera vez: contraseña de setup → Setup Inicial → ejecuta los 7 pasos
+Cuando Sofi guarda un Feedback Process, se genera un link como:
 
-## 🔧 Stack técnico
+```
+https://attendance-backoffice-stt.streamlit.app/?feedback=FB-20260519143012-ABC123
+```
 
-- Streamlit 1.42+ con CSS custom + componentes HTML embebidos
-- Google Sheets vía gspread (8 worksheets)
-- bcrypt + sesión Streamlit para auth
-- Twemoji SVG (renderiza igual en Windows/Mac/Linux/iOS/Android)
-- Snackbar Material Design custom (4 seg auto-dismiss, sin globos infantiles)
-- Timezone: America/Guatemala
+El empleado abre ese link en su navegador (desde WhatsApp), ve el feedback, escribe su nombre,
+opcionalmente deja un comentario, y firma virtualmente. La firma queda registrada en el sheet
+y Sofi puede verla desde el historial.
+
+## 🚀 Deploy
+
+1. Sube todo a GitHub
+2. Reboot la app en Streamlit Cloud
+3. Login → Setup Inicial → Paso 2 (crea las 11 worksheets necesarias: Empleados, Horarios,
+   Asistencia, Horas_Extras, Vacaciones, Permisos, Feriados, Usuarios, Incidencias,
+   Reportes_Dudas, Feedback_Process)
+
+## 🔧 Stack
+
+- Streamlit 1.42+ + Google Sheets (gspread)
+- bcrypt para auth
+- Twemoji SVG para banderas (renderizan igual en todos los SO)
+- reportlab para PDFs corporativos
+- python-docx para exportar DOCX (formato Word)
 - Auto-refresh: 60s en dashboard, 5 min en otros módulos
+- Timezone: America/Guatemala
 
-## 📊 Worksheets de Google Sheets
+## 📊 Worksheets
 
 | Hoja | Propósito |
 |---|---|
 | Empleados | Datos maestros del equipo |
-| Horarios | Horario semanal por empleado (7 filas c/u) |
-| Asistencia | Log de excepciones |
+| Horarios | Horario semanal por empleado |
+| Asistencia | Log de excepciones de asistencia |
 | Horas_Extras | Horas extras autorizadas |
 | Vacaciones | Días de vacaciones tomados |
 | Permisos | Permisos y ausencias |
 | Feriados | Feriados US + coverage |
-| Incidencias | Reportes en vivo durante el turno (sin luz, médico, etc.) |
+| Incidencias | Reportes en vivo durante el turno |
+| Reportes_Dudas | Reportes diarios estructurados al team |
+| Feedback_Process | Feedback formal con firma virtual |
 | Usuarios | Credenciales (bcrypt) |
-
-## 👥 Equipo BackOffice (8 personas)
-
-- **GT** 🇬🇹 — Evelyn (Manager), Sofia (Supervisora), Alessandro, Javier, Sebastian
-- **VE** 🇻🇪 — Anny, Henry (sábados recurrentes), Mark
 
 ---
 
