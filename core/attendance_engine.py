@@ -124,7 +124,13 @@ def load_vacations_for_date(target_date: Optional[date] = None) -> pd.DataFrame:
 
 
 def load_permits_for_date(target_date: Optional[date] = None) -> pd.DataFrame:
-    """Permisos activos en una fecha (rango fecha_inicio → fecha_fin)."""
+    """
+    Permisos DE DÍA COMPLETO activos en una fecha (rango fecha_inicio → fecha_fin).
+
+    IMPORTANTE: solo retorna permisos con modalidad DIA_COMPLETO o sin modalidad (legacy).
+    Los permisos PARCIAL_CON_FIN y PARCIAL_ABIERTO se cargan vía load_partial_permits_for_date
+    para evitar que oscurezcan el día completo del empleado en el timeline.
+    """
     target_date = target_date or today_gt()
     df = read_worksheet(WS_PERMITS)
     if df.empty:
@@ -132,6 +138,11 @@ def load_permits_for_date(target_date: Optional[date] = None) -> pd.DataFrame:
 
     df["fi_parsed"] = df["fecha_inicio"].apply(parse_date)
     df["ff_parsed"] = df["fecha_fin"].apply(parse_date)
+
+    # Filtrar solo DIA_COMPLETO o sin modalidad (legacy)
+    if "modalidad" in df.columns:
+        df = df[df["modalidad"].fillna("").astype(str).str.upper().isin(["", "DIA_COMPLETO"])].copy()
+
     mask = df.apply(
         lambda r: r["fi_parsed"] is not None and r["ff_parsed"] is not None
                   and r["fi_parsed"] <= target_date <= r["ff_parsed"],
