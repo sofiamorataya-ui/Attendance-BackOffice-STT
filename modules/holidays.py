@@ -111,6 +111,88 @@ def render():
     st.markdown(kpi_html, unsafe_allow_html=True)
 
     # ============================================================
+    # FORMULARIO DE ASIGNACIÓN (movido ARRIBA del grid para que sea visible)
+    # ============================================================
+    holiday_options = {}
+    for _, hol in year_df.iterrows():
+        d = hol["fecha_parsed"]
+        emp_id = str(hol.get("empleado_id_cubre", "")).strip()
+        emp_match = employees_active[employees_active["id"].astype(str) == emp_id]
+        current_emp = emp_match.iloc[0]["nombre"] if emp_id and not emp_match.empty else "Sin asignar"
+        label = f"{d.strftime('%d/%m/%Y')} · {hol.get('nombre_feriado', '')} → {current_emp}"
+        holiday_options[label] = hol
+
+    emp_options = {"— Sin asignar —": None}
+    for _, emp in employees_active.iterrows():
+        flag = flag_emoji_unicode(emp.get("pais", ""))
+        emp_options[f"{flag}  {emp['nombre']}"] = int(emp["id"])
+
+    with st.expander("🇺🇸  Asignar coverage de feriado", expanded=True):
+        with st.form("assign_holiday_form", clear_on_submit=False):
+            col1, col2 = st.columns([2, 2])
+            with col1:
+                selected_holiday_key = st.selectbox(
+                    "Feriado",
+                    options=list(holiday_options.keys()),
+                    key="hol_select",
+                )
+            with col2:
+                selected_emp_key = st.selectbox(
+                    "Asignar a",
+                    options=list(emp_options.keys()),
+                    key="hol_assign_emp",
+                )
+
+            observaciones = st.text_input(
+                "Observaciones (opcional)",
+                placeholder="Ej: Confirmado por email, cubre cliente XYZ...",
+                key="hol_obs",
+                max_chars=200,
+            )
+
+            submitted = st.form_submit_button(
+                "Guardar asignación", use_container_width=True, type="primary",
+            )
+
+            if submitted:
+                try:
+                    selected_holiday = holiday_options[selected_holiday_key]
+                    selected_emp_id = emp_options[selected_emp_key]
+
+                    if selected_emp_id is None:
+                        new_emp_id = ""
+                        new_emp_name = ""
+                        confirmado = "FALSE"
+                    else:
+                        new_emp_id = selected_emp_id
+                        emp_row = employees_active[employees_active["id"].astype(str) == str(selected_emp_id)].iloc[0]
+                        new_emp_name = emp_row["nombre"]
+                        confirmado = "TRUE"
+
+                    sheet_idx = _find_holiday_row_idx(selected_holiday["fecha"])
+                    if sheet_idx:
+                        ws = get_worksheet(WS_HOLIDAYS)
+                        ws.update(f"A{sheet_idx}:F{sheet_idx}", [[
+                            selected_holiday["fecha"],
+                            selected_holiday.get("nombre_feriado", ""),
+                            new_emp_id,
+                            new_emp_name,
+                            confirmado,
+                            observaciones,
+                        ]], value_input_option="USER_ENTERED")
+                        from core.sheets import invalidate_cache
+                        invalidate_cache()
+                        notify_success(
+                            f"{selected_holiday.get('nombre_feriado')} → {new_emp_name or 'Sin asignar'}",
+                            title="Coverage actualizado"
+                        )
+                        st.rerun()
+                    else:
+                        notify_error("No se encontró el feriado en el sheet.")
+                except Exception as e:
+                    notify_error(str(e))
+
+    # ============================================================
     # GRID DE FERIADOS (cards estilo imagen 5)
     # ============================================================
     st.markdown(
@@ -164,13 +246,20 @@ def render():
             badge_style = "background:#DBEAFE;color:#1E40AF;"
             badge_text = f"EN {days_to}d"
 
+        from core.flags import flag_img_inline
+        flag_us_html = flag_img_inline("US", size=16)
+
         cards_html.append(f'''
         <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:8px;
                     padding:18px 20px;display:flex;flex-direction:column;gap:12px;
                     {'opacity:0.6;' if es_pasado else ''}">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <span style="font-size:18px;">🇺🇸</span>
+                    {flag_us_html}
+                    <span style="font-size:10px;font-weight:700;letter-spacing:1px;color:#0A0A0A;
+                                 font-family:'JetBrains Mono',monospace;">USA</span>
+                    <span style="font-size:11px;font-weight:700;letter-spacing:1px;color:#94A3B8;
+                                 font-family:'JetBrains Mono',monospace;">·</span>
                     <span style="font-size:11px;font-weight:700;letter-spacing:1px;color:#94A3B8;
                                  font-family:'JetBrains Mono',monospace;">{weekday}</span>
                 </div>
@@ -205,95 +294,6 @@ def render():
     rows_estimate = (n_holidays + cols_per_row_estimate - 1) // cols_per_row_estimate
     grid_height = rows_estimate * 200 + 40
     components.html(grid_html, height=grid_height, scrolling=False)
-
-    # ============================================================
-    # FORMULARIO DE ASIGNACIÓN
-    # ============================================================
-    st.markdown(
-        '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
-        'text-transform:uppercase;color:#DC2626;margin:24px 0 12px 0;">'
-        '— ASIGNAR COVERAGE</div>',
-        unsafe_allow_html=True,
-    )
-
-    holiday_options = {}
-    for _, hol in year_df.iterrows():
-        d = hol["fecha_parsed"]
-        emp_id = str(hol.get("empleado_id_cubre", "")).strip()
-        emp_match = employees_active[employees_active["id"].astype(str) == emp_id]
-        current_emp = emp_match.iloc[0]["nombre"] if emp_id and not emp_match.empty else "Sin asignar"
-        label = f"{d.strftime('%d/%m/%Y')} · {hol.get('nombre_feriado', '')} → {current_emp}"
-        holiday_options[label] = hol
-
-    emp_options = {"— Sin asignar —": None}
-    for _, emp in employees_active.iterrows():
-        flag = flag_emoji_unicode(emp.get("pais", ""))
-        emp_options[f"{flag}  {emp['nombre']}"] = int(emp["id"])
-
-    with st.form("assign_holiday_form", clear_on_submit=False):
-        col1, col2 = st.columns([2, 2])
-        with col1:
-            selected_holiday_key = st.selectbox(
-                "Feriado",
-                options=list(holiday_options.keys()),
-                key="hol_select",
-            )
-        with col2:
-            selected_emp_key = st.selectbox(
-                "Asignar a",
-                options=list(emp_options.keys()),
-                key="hol_assign_emp",
-            )
-
-        observaciones = st.text_input(
-            "Observaciones (opcional)",
-            placeholder="Ej: Confirmado por email, cubre cliente XYZ...",
-            key="hol_obs",
-            max_chars=200,
-        )
-
-        submitted = st.form_submit_button(
-            "Guardar asignación", use_container_width=True, type="primary",
-        )
-
-        if submitted:
-            try:
-                selected_holiday = holiday_options[selected_holiday_key]
-                selected_emp_id = emp_options[selected_emp_key]
-
-                if selected_emp_id is None:
-                    new_emp_id = ""
-                    new_emp_name = ""
-                    confirmado = "FALSE"
-                else:
-                    new_emp_id = selected_emp_id
-                    emp_row = employees_active[employees_active["id"].astype(str) == str(selected_emp_id)].iloc[0]
-                    new_emp_name = emp_row["nombre"]
-                    confirmado = "TRUE"
-
-                # Encontrar fila en sheet y actualizar
-                sheet_idx = _find_holiday_row_idx(selected_holiday["fecha"])
-                if sheet_idx:
-                    ws = get_worksheet(WS_HOLIDAYS)
-                    ws.update(f"A{sheet_idx}:F{sheet_idx}", [[
-                        selected_holiday["fecha"],
-                        selected_holiday.get("nombre_feriado", ""),
-                        new_emp_id,
-                        new_emp_name,
-                        confirmado,
-                        observaciones,
-                    ]], value_input_option="USER_ENTERED")
-                    from core.sheets import invalidate_cache
-                    invalidate_cache()
-                    notify_success(
-                        f"{selected_holiday.get('nombre_feriado')} → {new_emp_name or 'Sin asignar'}",
-                        title="Coverage actualizado"
-                    )
-                    st.rerun()
-                else:
-                    notify_error("No se encontró el feriado en el sheet.")
-            except Exception as e:
-                notify_error(str(e))
 
 
 def _find_holiday_row_idx(fecha_str: str):
