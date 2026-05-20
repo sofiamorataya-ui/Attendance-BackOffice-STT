@@ -144,12 +144,12 @@ body {
     background: #FFFFFF;
     border: 1px solid #E2E8F0;
     border-radius: 8px;
-    margin-bottom: 16px;
+    margin-bottom: 0;
     overflow: hidden;
     box-shadow: 0 1px 2px rgba(0,0,0,0.02);
 }
 .stt-country-header {
-    padding: 16px 22px;
+    padding: 12px 22px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1095,7 +1095,7 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
         '</div></div>'
         '</div></div></body></html>'
     )
-    components.html(country_header_html, height=110, scrolling=False)
+    components.html(country_header_html, height=72, scrolling=False)
 
     # ---- Timeline header (las horas) ----
     timeline_hdr_html = (
@@ -1103,12 +1103,12 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
         + DASHBOARD_CSS +
         '</head><body style="margin:0;padding:0;background:transparent;">'
         '<div class="stt-wrap">'
-        '<div class="stt-country-card" style="margin-top:-12px;padding-top:0;'
+        '<div class="stt-country-card" style="margin-top:0;padding-top:6px;padding-bottom:6px;'
         'border-top:0;border-top-left-radius:0;border-top-right-radius:0;">'
         + render_timeline_header(TIMELINE_START_HOUR, TIMELINE_END_HOUR) +
         '</div></div></body></html>'
     )
-    components.html(timeline_hdr_html, height=60, scrolling=False)
+    components.html(timeline_hdr_html, height=44, scrolling=False)
 
     # ---- Por cada empleado: fila visual + expander nativo ----
     for s in sorted_statuses:
