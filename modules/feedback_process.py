@@ -304,44 +304,73 @@ def _render_new_form(employees_active: pd.DataFrame):
             fb_id = f"FB-{now_gt().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8].upper()}"
             timestamp = now_gt().strftime("%Y-%m-%d %H:%M:%S")
 
+            def _safe(v):
+                """Convierte cualquier valor a string seguro para gspread (no None, no numpy types)."""
+                if v is None:
+                    return ""
+                if hasattr(v, "strftime"):
+                    return v.strftime("%Y-%m-%d")
+                return str(v)
+
             row = [
-                fb_id,
-                fecha_fb.strftime("%Y-%m-%d"),
-                selected_emp["id"],
-                selected_emp["nombre"],
-                posicion,
-                departamento,
-                manager,
-                tipo_feedback,
-                area_feedback,
-                area_otro,
-                descripcion_situacion,
-                feedback_dado,
-                comportamiento_esperado,
-                accion_empleado,
-                apoyo_manager,
-                fecha_seguimiento.strftime("%Y-%m-%d") if fecha_seguimiento else "",
-                "", "",  # empleado_acknowledged, comentario_empleado (vacíos hasta que firme)
-                followup_required,
-                followup_date.strftime("%Y-%m-%d") if followup_date else "",
-                followup_notes,
+                _safe(fb_id),
+                _safe(fecha_fb),
+                _safe(selected_emp["id"]),
+                _safe(selected_emp["nombre"]),
+                _safe(posicion),
+                _safe(departamento),
+                _safe(manager),
+                _safe(tipo_feedback),
+                _safe(area_feedback),
+                _safe(area_otro),
+                _safe(descripcion_situacion),
+                _safe(feedback_dado),
+                _safe(comportamiento_esperado),
+                _safe(accion_empleado),
+                _safe(apoyo_manager),
+                _safe(fecha_seguimiento),
+                "",  # empleado_acknowledged
+                "",  # comentario_empleado
+                _safe(followup_required),
+                _safe(followup_date) if followup_required == "Yes" else "",
+                _safe(followup_notes),
                 "PENDIENTE_FIRMA",
                 "",  # fecha_firma
                 "",  # comentario_firma
                 "",  # ip_firma
-                timestamp,
-                timestamp,
+                _safe(timestamp),
+                _safe(timestamp),
             ]
+
+            # Validar longitud antes de enviar
+            expected_cols = 27
+            if len(row) != expected_cols:
+                notify_error(
+                    f"Error interno: el row tiene {len(row)} columnas, "
+                    f"se esperaban {expected_cols}. Reporta este error."
+                )
+                return
+
             append_row(WS_FEEDBACK_PROCESS, row)
             invalidate_cache()
             notify_success(
-                f"Feedback para {selected_emp['nombre']} guardado. Ve al historial para compartir el link.",
+                f"Feedback para {selected_emp['nombre']} guardado.",
                 title="Feedback guardado"
             )
             st.session_state["last_saved_fb_id"] = fb_id
             st.rerun()
         except Exception as e:
-            notify_error(str(e))
+            # Error específico con tipo de excepción y mensaje completo
+            import traceback
+            err_type = type(e).__name__
+            err_msg = str(e) if str(e) else "Sin mensaje"
+            notify_error(f"{err_type}: {err_msg}")
+            # También guardar el traceback completo en session_state para verlo si es necesario
+            st.session_state["last_fb_error"] = traceback.format_exc()
+            # Mostrar el error visible en pantalla
+            st.error(f"**{err_type}:** {err_msg}")
+            with st.expander("🔧 Detalles técnicos del error"):
+                st.code(traceback.format_exc(), language="python")
 
     # Si acabamos de guardar, mostrar info del link
     last_fb = st.session_state.get("last_saved_fb_id")
