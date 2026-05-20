@@ -1172,19 +1172,24 @@ def _render_employee_row_with_form(status_data: dict):
         '</div></div></body></html>'
     )
 
-    # Columnas: 1 grande para el iframe + 1 pequeña para el botón
-    col_row, col_btn = st.columns([20, 1])
+    # Columnas: 1 grande para el iframe + 2 pequeñas para los botones (🚨 incidencia, 🚦 permiso)
+    col_row, col_btn_inc, col_btn_per = st.columns([20, 1, 1])
 
     with col_row:
         components.html(full_row_html, height=75, scrolling=False)
 
     active_inc = status_data.get("active_incident")
 
-    with col_btn:
-        # Padding-top alineado con el centro vertical de la barra (~28px desde el top del iframe)
+    # Detectar permiso PARCIAL_ABIERTO activo
+    from modules.exceptions import get_active_partial_permit_for_employee
+    try:
+        active_perm = get_active_partial_permit_for_employee(emp_id, today_gt())
+    except Exception:
+        active_perm = None
+
+    with col_btn_inc:
         st.markdown("<div style='padding-top:18px;'></div>", unsafe_allow_html=True)
         if active_inc:
-            # Hay incidencia ACTIVA → botón "■" para terminarla
             button_clicked_terminate = st.button(
                 "■",
                 key=f"terminate_{emp_id}",
@@ -1200,6 +1205,24 @@ def _render_employee_row_with_form(status_data: dict):
             )
             button_clicked_terminate = False
 
+    with col_btn_per:
+        st.markdown("<div style='padding-top:18px;'></div>", unsafe_allow_html=True)
+        if active_perm is not None:
+            button_clicked_close_perm = st.button(
+                "■",
+                key=f"close_perm_{emp_id}",
+                help=f"Cerrar permiso abierto de {emp_name}",
+                type="primary",
+            )
+            button_clicked_open_perm = False
+        else:
+            button_clicked_open_perm = st.button(
+                "🚦",
+                key=f"open_perm_{emp_id}",
+                help=f"Registrar permiso para {emp_name}",
+            )
+            button_clicked_close_perm = False
+
     # ============================================================
     # ABRIR DIALOG SEGÚN BOTÓN PRESIONADO
     # ============================================================
@@ -1207,6 +1230,10 @@ def _render_employee_row_with_form(status_data: dict):
         _show_incident_dialog(emp_id, emp_name, status_data)
     if button_clicked_terminate:
         _show_terminate_dialog(emp_id, emp_name, status_data, active_inc)
+    if button_clicked_open_perm:
+        _show_permit_dialog(emp_id, emp_name, status_data)
+    if button_clicked_close_perm:
+        _show_close_permit_dialog(emp_id, emp_name, active_perm)
 
 
 @st.dialog("Terminar incidencia activa", width="large")
@@ -1472,3 +1499,272 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
 def _show_incident_dialog(emp_id: int, emp_name: str, status_data: dict):
     """Wrapper. Streamlit dialog API."""
     _show_incident_dialog_impl(emp_id, emp_name, status_data)
+
+
+# ============================================================
+# DIALOG: REGISTRAR PERMISO (3 modos)
+# ============================================================
+@st.dialog("Registrar permiso", width="large")
+def _show_permit_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
+    """
+    Dialog para registrar un permiso en 3 modos:
+    - DÍA COMPLETO (rango de fechas)
+    - PARCIAL CON FIN (hoy, hora inicio + hora fin)
+    - PARCIAL ABIERTO (hoy, solo hora inicio, queda activo hasta que se cierre)
+    """
+    from core.time_utils import parse_time as _parse_time, current_time_gt, today_gt as _today_gt
+    from core.config import PERMIT_TYPES
+    from datetime import timedelta as _td
+    from modules.exceptions import register_partial_permit_now
+    from core.sheets import append_row, invalidate_cache
+    import uuid as _uuid
+
+    st.markdown(f"### 🚦 Permiso para **{emp_name}**")
+
+    # PERMIT_TYPES viene del config (PERSONAL, MEDICO, INCAPACIDAD_MEDICA, DUELO, OTRO)
+    tipo = st.selectbox(
+        "Tipo de permiso",
+        options=PERMIT_TYPES,
+        key=f"perm_tipo_{emp_id}",
+    )
+
+    modalidad = st.radio(
+        "Modalidad",
+        options=["DIA_COMPLETO", "PARCIAL_CON_FIN", "PARCIAL_ABIERTO"],
+        format_func=lambda x: {
+            "DIA_COMPLETO": "📅 Día completo",
+            "PARCIAL_CON_FIN": "⏱ Parcial con hora fin (sabe a qué hora regresa)",
+            "PARCIAL_ABIERTO": "▶ Parcial abierto (no sabe cuándo regresa)",
+        }[x],
+        horizontal=False,
+        key=f"perm_modalidad_{emp_id}",
+    )
+
+    today = _today_gt()
+    fecha_inicio = today
+    fecha_fin = today
+    hi_parsed = None
+    hf_parsed = None
+
+    if modalidad == "DIA_COMPLETO":
+        col_fi, col_ff = st.columns(2)
+        with col_fi:
+            fecha_inicio = st.date_input(
+                "Fecha inicio",
+                value=today,
+                format="DD/MM/YYYY",
+                key=f"perm_fi_{emp_id}",
+            )
+        with col_ff:
+            fecha_fin = st.date_input(
+                "Fecha fin",
+                value=today,
+                format="DD/MM/YYYY",
+                key=f"perm_ff_{emp_id}",
+            )
+
+    elif modalidad == "PARCIAL_CON_FIN":
+        col_hi, col_hf = st.columns(2)
+        now_hhmm = current_time_gt().strftime("%H:%M")
+        with col_hi:
+            hi_str = st.text_input(
+                "Hora inicio (HH:MM)",
+                value=now_hhmm,
+                max_chars=8,
+                placeholder="06:00",
+                key=f"perm_hi_{emp_id}",
+            )
+            hi_parsed = _parse_time(hi_str)
+            if hi_str and not hi_parsed:
+                st.error(f"❌ Hora inválida: '{hi_str}'")
+        with col_hf:
+            hf_str = st.text_input(
+                "Hora fin (HH:MM)",
+                value=(current_time_gt().replace(hour=min(current_time_gt().hour + 1, 23))).strftime("%H:%M"),
+                max_chars=8,
+                placeholder="08:00",
+                key=f"perm_hf_{emp_id}",
+            )
+            hf_parsed = _parse_time(hf_str)
+            if hf_str and not hf_parsed:
+                st.error(f"❌ Hora inválida: '{hf_str}'")
+        # Validar
+        if hi_parsed and hf_parsed:
+            from core.time_utils import time_to_minutes
+            if time_to_minutes(hf_parsed) <= time_to_minutes(hi_parsed):
+                st.warning("⚠️ La hora fin debe ser posterior a la hora inicio.")
+                hf_parsed = None
+
+    else:  # PARCIAL_ABIERTO
+        st.info("Este modo registrará la incidencia con la hora actual como inicio. Después se puede cerrar con el botón ■.")
+
+    # Motivo
+    motivo = st.text_input(
+        "Motivo (descripción)",
+        placeholder="Ej: Cita IGSS, Cita médica, Asunto familiar...",
+        max_chars=200,
+        key=f"perm_motivo_{emp_id}",
+    )
+
+    st.divider()
+
+    # Botones
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("Cancelar", use_container_width=True, key=f"perm_cancel_{emp_id}"):
+            st.rerun()
+
+    with col_b:
+        # Validaciones de submit
+        if modalidad == "DIA_COMPLETO":
+            disabled = not motivo.strip() or fecha_fin < fecha_inicio
+        elif modalidad == "PARCIAL_CON_FIN":
+            disabled = not motivo.strip() or not (hi_parsed and hf_parsed)
+        else:
+            disabled = not motivo.strip()
+
+        if st.button(
+            "✓ Registrar permiso",
+            use_container_width=True,
+            type="primary",
+            disabled=disabled,
+            key=f"perm_submit_{emp_id}",
+        ):
+            try:
+                if modalidad == "PARCIAL_ABIERTO":
+                    result = register_partial_permit_now(
+                        employee_id=emp_id,
+                        employee_name=emp_name,
+                        tipo=tipo,
+                        motivo=motivo,
+                        registered_by=current_user_display_name(),
+                    )
+                    if result["success"]:
+                        notify_success(result["message"], title="Permiso activo")
+                        st.rerun()
+                    else:
+                        notify_error(result.get("message", "Error"))
+                else:
+                    # DIA_COMPLETO o PARCIAL_CON_FIN
+                    from core.config import WS_PERMITS
+                    now = now_gt()
+                    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+                    id_permiso = f"PER-{now.strftime('%Y%m%d%H%M%S')}-{_uuid.uuid4().hex[:6].upper()}"
+                    row = [
+                        emp_id, emp_name,
+                        fecha_inicio.strftime("%Y-%m-%d"),
+                        fecha_fin.strftime("%Y-%m-%d"),
+                        tipo, motivo,
+                        current_user_display_name(), timestamp,
+                        modalidad,
+                        hi_parsed.strftime("%H:%M") if hi_parsed else "",
+                        hf_parsed.strftime("%H:%M") if hf_parsed else "",
+                        "CERRADO",
+                        id_permiso,
+                    ]
+                    append_row(WS_PERMITS, row)
+                    invalidate_cache()
+                    if modalidad == "DIA_COMPLETO":
+                        days = (fecha_fin - fecha_inicio).days + 1
+                        msg = f"{emp_name} · {tipo} · {fecha_inicio.strftime('%d/%m')} – {fecha_fin.strftime('%d/%m')} ({days} día{'s' if days != 1 else ''})"
+                    else:
+                        msg = f"{emp_name} · {tipo} · {hi_parsed.strftime('%H:%M')}–{hf_parsed.strftime('%H:%M')}"
+                    notify_success(msg, title="Permiso registrado")
+                    st.rerun()
+            except Exception as e:
+                notify_error(str(e))
+
+
+def _show_permit_dialog(emp_id: int, emp_name: str, status_data: dict):
+    """Wrapper."""
+    _show_permit_dialog_impl(emp_id, emp_name, status_data)
+
+
+# ============================================================
+# DIALOG: CERRAR PERMISO ABIERTO
+# ============================================================
+@st.dialog("Cerrar permiso abierto", width="large")
+def _show_close_permit_dialog_impl(emp_id: int, emp_name: str, active_perm):
+    """Dialog para cerrar un permiso PARCIAL_ABIERTO con hora fin."""
+    from core.time_utils import parse_time as _parse_time, current_time_gt
+    from modules.exceptions import close_partial_permit
+
+    st.markdown(f"### ■ Cerrar permiso de **{emp_name}**")
+
+    if active_perm is None:
+        st.error("No se encontró el permiso activo.")
+        return
+
+    id_permiso = str(active_perm.get("id_permiso", ""))
+    tipo = str(active_perm.get("tipo", ""))
+    hi_str = str(active_perm.get("hora_inicio", ""))
+    motivo = str(active_perm.get("motivo", "") or "")
+
+    st.markdown(
+        f'<div style="background:#F3E8FF;border-left:4px solid #8B5CF6;'
+        f'padding:14px 18px;border-radius:0 6px 6px 0;margin:8px 0 16px 0;">'
+        f'<div style="font-size:14px;color:#0A0A0A;">'
+        f'<strong>🚦 {tipo}</strong> · Iniciado a las {hi_str}'
+        + (f' · <em>{motivo}</em>' if motivo else '') +
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    now_hhmm = current_time_gt().strftime("%H:%M")
+
+    # Botón "Cerrar AHORA"
+    if st.button(
+        f"■ Cerrar AHORA ({now_hhmm})",
+        use_container_width=True,
+        type="primary",
+        key=f"closeperm_now_{emp_id}",
+    ):
+        try:
+            result = close_partial_permit(id_permiso, current_time_gt(), current_user_display_name())
+            if result["success"]:
+                notify_success(f"{emp_name} regresó a las {now_hhmm}.", title="Permiso cerrado")
+                st.rerun()
+            else:
+                notify_error(result["message"])
+        except Exception as e:
+            notify_error(str(e))
+
+    st.caption("— O cerrar con hora fin manual —")
+
+    hf_str = st.text_input(
+        "Hora fin (HH:MM)",
+        value=now_hhmm,
+        max_chars=8,
+        placeholder="14:00",
+        key=f"closeperm_hf_{emp_id}",
+    )
+    hf_parsed = _parse_time(hf_str)
+    if hf_str and not hf_parsed:
+        st.error(f"❌ Hora inválida: '{hf_str}'")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("Cancelar", use_container_width=True, key=f"closeperm_cancel_{emp_id}"):
+            st.rerun()
+    with col_b:
+        if st.button(
+            "✓ Cerrar con esta hora",
+            use_container_width=True,
+            type="primary",
+            disabled=not hf_parsed,
+            key=f"closeperm_submit_{emp_id}",
+        ):
+            try:
+                result = close_partial_permit(id_permiso, hf_parsed, current_user_display_name())
+                if result["success"]:
+                    notify_success(f"{emp_name} regresó a las {hf_parsed.strftime('%H:%M')}.", title="Permiso cerrado")
+                    st.rerun()
+                else:
+                    notify_error(result["message"])
+            except Exception as e:
+                notify_error(str(e))
+
+
+def _show_close_permit_dialog(emp_id: int, emp_name: str, active_perm):
+    """Wrapper."""
+    _show_close_permit_dialog_impl(emp_id, emp_name, active_perm)
