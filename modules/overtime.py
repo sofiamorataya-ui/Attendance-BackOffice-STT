@@ -201,14 +201,15 @@ def _render_monthly_matrix():
 
 
 def _render_register_form(employees_active: pd.DataFrame):
-    """Formulario para registrar horas extras."""
+    """Formulario para registrar horas extras con Hora Inicio + Hora Fin."""
     st.markdown(
         '<div style="font-size:13px;color:#64748B;margin-bottom:16px;'
         'padding:12px 16px;background:#F8FAFC;border-left:3px solid #D97706;'
         'border-radius:0 4px 4px 0;">'
         '<strong style="color:#0A0A0A">Solo registra horas extras aprobadas</strong><br>'
-        'Las horas extras deben ser autorizadas por supervisión antes de registrarse. '
-        'Henry tiene sábados recurrentes automáticos (7h cada sábado).'
+        'Las horas extras deben ser autorizadas por supervisión. '
+        'Henry tiene sábados recurrentes automáticos (7h cada sábado). '
+        'Las horas se calculan automáticamente desde Hora Inicio y Hora Fin.'
         '</div>',
         unsafe_allow_html=True,
     )
@@ -222,58 +223,113 @@ def _render_register_form(employees_active: pd.DataFrame):
             "nombre": emp["nombre"],
         }
 
-    with st.form("new_overtime_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns([2, 1.5, 1])
+    from core.time_utils import parse_time as _parse_time, time_to_minutes
 
-        with col1:
-            emp_display = st.selectbox(
-                "Empleado", options=list(emp_options.keys()), key="ot_emp",
-            )
-        with col2:
-            fecha_ot = st.date_input(
-                "Fecha", value=today_gt(),
-                max_value=today_gt() + timedelta(days=7),
-                format="DD/MM/YYYY", key="ot_fecha",
-            )
-        with col3:
-            horas = st.number_input(
-                "Horas", min_value=0.5, max_value=12.0, value=1.0,
-                step=0.5, key="ot_horas",
-            )
-
-        motivo = st.text_area(
-            "Motivo / descripción",
-            placeholder="Ej: Cierre de mes contable, cobertura de feriado US, etc.",
-            key="ot_motivo", max_chars=300,
+    # NO usar st.form porque queremos preview en vivo de la duración
+    col1, col2 = st.columns([2, 1.5])
+    with col1:
+        emp_display = st.selectbox(
+            "Empleado", options=list(emp_options.keys()), key="ot_emp",
+        )
+    with col2:
+        fecha_ot = st.date_input(
+            "Fecha", value=today_gt(),
+            max_value=today_gt() + timedelta(days=7),
+            format="DD/MM/YYYY", key="ot_fecha",
         )
 
-        submitted = st.form_submit_button(
-            "Registrar horas extras", use_container_width=True, type="primary",
+    col_hi, col_hf = st.columns(2)
+    with col_hi:
+        hi_str = st.text_input(
+            "Hora inicio (HH:MM)",
+            value="18:00",
+            max_chars=8,
+            placeholder="18:00",
+            key="ot_hi",
+            help="Acepta 18:00, 6:00 PM, 1800, etc.",
+        )
+    with col_hf:
+        hf_str = st.text_input(
+            "Hora fin (HH:MM)",
+            value="22:00",
+            max_chars=8,
+            placeholder="22:00",
+            key="ot_hf",
+            help="Acepta 22:00, 10:00 PM, 2200, etc.",
         )
 
-        if submitted:
-            if not motivo.strip():
-                notify_error("El motivo es obligatorio.")
-            else:
-                try:
-                    selected = emp_options[emp_display]
-                    timestamp = now_gt().strftime("%Y-%m-%d %H:%M:%S")
-                    row = [
-                        fecha_ot.strftime("%Y-%m-%d"),
-                        selected["id"], selected["nombre"], horas,
-                        motivo, current_user_display_name(), timestamp, "FALSE",
-                    ]
-                    append_row(WS_OVERTIME, row)
-                    from core.sheets import invalidate_cache
-                    invalidate_cache()
-                    notify_success(
-                        f"{horas}h registradas para {selected['nombre']} · "
-                        f"{fecha_ot.strftime('%d/%m/%Y')}",
-                        title="Horas extras registradas"
-                    )
-                    st.rerun()
-                except Exception as e:
-                    notify_error(str(e))
+    # Validar y mostrar preview en vivo
+    hi_parsed = _parse_time(hi_str)
+    hf_parsed = _parse_time(hf_str)
+
+    if hi_str and not hi_parsed:
+        st.error(f"❌ Hora inicio inválida: '{hi_str}'. Usa formato HH:MM")
+    if hf_str and not hf_parsed:
+        st.error(f"❌ Hora fin inválida: '{hf_str}'. Usa formato HH:MM")
+
+    horas_calc = 0.0
+    duracion_pretty = ""
+    if hi_parsed and hf_parsed:
+        mins_hi = time_to_minutes(hi_parsed)
+        mins_hf = time_to_minutes(hf_parsed)
+        if mins_hf <= mins_hi:
+            # Caso turno nocturno cruza medianoche (ej: 22:00 → 02:00)
+            mins_hf += 24 * 60
+        diff_min = mins_hf - mins_hi
+        horas_calc = round(diff_min / 60.0, 2)
+        h_int = diff_min // 60
+        m_int = diff_min % 60
+        if m_int == 0:
+            duracion_pretty = f"{h_int}h"
+        else:
+            duracion_pretty = f"{h_int}h {m_int}min"
+
+        if horas_calc > 12:
+            st.warning(
+                f"⚠️ La duración es {duracion_pretty} ({horas_calc}h). "
+                f"Si cruza medianoche está bien; si no, revisa las horas."
+            )
+        elif horas_calc <= 0:
+            st.error("❌ La hora fin debe ser posterior a la hora inicio.")
+        else:
+            st.success(
+                f"✅ Duración calculada: **{duracion_pretty}** "
+                f"(se registrarán **{horas_calc}h**)"
+            )
+
+    motivo = st.text_area(
+        "Motivo / descripción",
+        placeholder="Ej: Cierre de mes contable, cobertura de feriado US, etc.",
+        key="ot_motivo", max_chars=300,
+    )
+
+    disabled = not (hi_parsed and hf_parsed and horas_calc > 0 and motivo.strip())
+
+    if st.button(
+        "Registrar horas extras", use_container_width=True, type="primary",
+        key="ot_submit", disabled=disabled,
+    ):
+        try:
+            selected = emp_options[emp_display]
+            timestamp = now_gt().strftime("%Y-%m-%d %H:%M:%S")
+            row = [
+                fecha_ot.strftime("%Y-%m-%d"),
+                selected["id"], selected["nombre"], horas_calc,
+                motivo.strip(), current_user_display_name(), timestamp, "FALSE",
+                hi_parsed.strftime("%H:%M"),
+                hf_parsed.strftime("%H:%M"),
+            ]
+            append_row(WS_OVERTIME, row)
+            from core.sheets import invalidate_cache
+            invalidate_cache()
+            notify_success(
+                f"{horas_calc}h ({duracion_pretty}) registradas para {selected['nombre']} · "
+                f"{fecha_ot.strftime('%d/%m/%Y')} · {hi_parsed.strftime('%H:%M')}–{hf_parsed.strftime('%H:%M')}",
+                title="Horas extras registradas"
+            )
+            st.rerun()
+        except Exception as e:
+            notify_error(str(e))
 
     # Últimos 10 registros - Editor inline
     st.divider()
@@ -295,12 +351,18 @@ def _render_register_form(employees_active: pd.DataFrame):
     df_recent = df.sort_values(["fecha_parsed", "timestamp"], ascending=False).head(10).copy()
     df_recent = df_recent.reset_index(drop=True)
 
+    # Helper para extraer hora_inicio/hora_fin con compatibilidad legacy
+    hi_col = df_recent["hora_inicio"].astype(str) if "hora_inicio" in df_recent.columns else pd.Series([""] * len(df_recent))
+    hf_col = df_recent["hora_fin"].astype(str) if "hora_fin" in df_recent.columns else pd.Series([""] * len(df_recent))
+
     # Construir DataFrame editable
     editor_df = pd.DataFrame({
         "_id": df_recent.index.astype(int),  # índice interno (no editable, oculto)
         "Eliminar": [False] * len(df_recent),
         "Fecha": pd.to_datetime(df_recent["fecha_parsed"]).dt.date if "fecha_parsed" in df_recent else df_recent["fecha"],
         "Empleado": df_recent["empleado_nombre"].astype(str),
+        "Hora Inicio": hi_col.reset_index(drop=True),
+        "Hora Fin": hf_col.reset_index(drop=True),
         "Horas": pd.to_numeric(df_recent["horas"], errors="coerce").fillna(0).astype(float),
         "Motivo": df_recent["motivo"].astype(str),
         "Aprobado por": df_recent["aprobado_por"].astype(str),
@@ -326,10 +388,19 @@ def _render_register_form(employees_active: pd.DataFrame):
                 options=sorted(employees_active["nombre"].tolist()) if not employees_active.empty else [],
                 required=True,
             ),
+            "Hora Inicio": st.column_config.TextColumn(
+                "Inicio", help="Formato HH:MM (ej. 18:00). Vacío = registro legacy.",
+                width="small",
+            ),
+            "Hora Fin": st.column_config.TextColumn(
+                "Fin", help="Formato HH:MM (ej. 22:00). Si se modifica, las horas se recalculan al guardar.",
+                width="small",
+            ),
             "Horas": st.column_config.NumberColumn(
                 "Horas",
-                min_value=0.0, max_value=24.0, step=0.5, format="%.1f",
+                min_value=0.0, max_value=24.0, step=0.25, format="%.2f",
                 width="small",
+                help="Se recalcula automáticamente si modificas Hora Inicio/Fin.",
             ),
             "Motivo": st.column_config.TextColumn("Motivo"),
             "Aprobado por": st.column_config.TextColumn("Aprobó", width="small"),
@@ -403,6 +474,8 @@ def _render_register_form(employees_active: pd.DataFrame):
             key="ot_save_btn",
         ):
             try:
+                from core.time_utils import parse_time as _parse_time, time_to_minutes
+
                 ws = get_worksheet(WS_OVERTIME)
                 all_rows = ws.get_all_values()
                 headers_row = all_rows[0]
@@ -416,8 +489,18 @@ def _render_register_form(employees_active: pd.DataFrame):
                     idx_rec = headers_row.index("recurrente")
                     idx_ts = headers_row.index("timestamp")
                 except ValueError:
-                    notify_error("Headers del sheet incompletos.")
+                    notify_error("Headers del sheet incompletos. Ve a Setup → Crear/verificar headers.")
                     return
+
+                # Las columnas hora_inicio/hora_fin pueden no existir si el sheet es legacy
+                idx_hi = headers_row.index("hora_inicio") if "hora_inicio" in headers_row else None
+                idx_hf = headers_row.index("hora_fin") if "hora_fin" in headers_row else None
+
+                if idx_hi is None or idx_hf is None:
+                    notify_warning(
+                        "Tu sheet no tiene columnas hora_inicio/hora_fin. "
+                        "Ve a Setup → 'Crear/verificar headers' para agregarlas automáticamente."
+                    )
 
                 changes = 0
                 for i, edited in edited_df.iterrows():
@@ -426,13 +509,27 @@ def _render_register_form(employees_active: pd.DataFrame):
                     orig_idx = int(edited["_id"])
                     orig = df_recent.iloc[orig_idx]
 
-                    # Comparar si hubo cambios
                     new_fecha = str(edited["Fecha"])
                     new_emp_name = str(edited["Empleado"])
-                    new_horas = float(edited["Horas"])
+                    new_horas_manual = float(edited["Horas"])
                     new_motivo = str(edited["Motivo"])
                     new_aprob = str(edited["Aprobado por"])
                     new_rec = "TRUE" if edited["Recurrente"] else "FALSE"
+                    new_hi_str = str(edited.get("Hora Inicio", "") or "").strip()
+                    new_hf_str = str(edited.get("Hora Fin", "") or "").strip()
+
+                    # Si hay HI y HF válidos, recalcular horas automáticamente
+                    hi_p = _parse_time(new_hi_str) if new_hi_str else None
+                    hf_p = _parse_time(new_hf_str) if new_hf_str else None
+                    new_horas_final = new_horas_manual
+                    if hi_p and hf_p:
+                        mins_hi = time_to_minutes(hi_p)
+                        mins_hf = time_to_minutes(hf_p)
+                        if mins_hf <= mins_hi:
+                            mins_hf += 24 * 60  # turno nocturno
+                        diff_min = mins_hf - mins_hi
+                        if diff_min > 0:
+                            new_horas_final = round(diff_min / 60.0, 2)
 
                     # Mapear empleado_id por nombre
                     emp_row_match = employees_active[employees_active["nombre"] == new_emp_name]
@@ -452,10 +549,14 @@ def _render_register_form(employees_active: pd.DataFrame):
                     ws.update_cell(target_row_idx, idx_fecha + 1, new_fecha)
                     ws.update_cell(target_row_idx, idx_emp_id + 1, new_emp_id)
                     ws.update_cell(target_row_idx, idx_emp + 1, new_emp_name)
-                    ws.update_cell(target_row_idx, idx_horas + 1, new_horas)
+                    ws.update_cell(target_row_idx, idx_horas + 1, new_horas_final)
                     ws.update_cell(target_row_idx, idx_motivo + 1, new_motivo)
                     ws.update_cell(target_row_idx, idx_aprob + 1, new_aprob)
                     ws.update_cell(target_row_idx, idx_rec + 1, new_rec)
+                    if idx_hi is not None:
+                        ws.update_cell(target_row_idx, idx_hi + 1, hi_p.strftime("%H:%M") if hi_p else "")
+                    if idx_hf is not None:
+                        ws.update_cell(target_row_idx, idx_hf + 1, hf_p.strftime("%H:%M") if hf_p else "")
                     changes += 1
 
                 from core.sheets import invalidate_cache
