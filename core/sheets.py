@@ -174,6 +174,7 @@ WORKSHEET_HEADERS = {
     "Horas_Extras": [
         "fecha", "empleado_id", "empleado_nombre",
         "horas", "motivo", "aprobado_por", "timestamp", "recurrente",
+        "hora_inicio", "hora_fin",
     ],
     "Vacaciones": [
         "empleado_id", "empleado_nombre", "fecha", "tipo",
@@ -217,7 +218,10 @@ WORKSHEET_HEADERS = {
 def ensure_headers() -> dict:
     """
     Verifica que todas las worksheets tengan los headers correctos.
-    Si una está vacía, escribe los headers.
+    - Si una worksheet no existe, la crea
+    - Si está vacía, escribe los headers
+    - Si le FALTAN columnas al final, las agrega automáticamente (sin tocar las existentes)
+    - Si tiene columnas en orden diferente, lo reporta pero NO modifica
     Devuelve dict con el estado de cada worksheet.
     """
     status = {}
@@ -226,7 +230,7 @@ def ensure_headers() -> dict:
 
     for ws_name in ALL_WORKSHEETS:
         if ws_name not in existing_titles:
-            ss.add_worksheet(title=ws_name, rows=1000, cols=20)
+            ss.add_worksheet(title=ws_name, rows=1000, cols=30)
             status[ws_name] = "creada"
 
         ws = ss.worksheet(ws_name)
@@ -236,10 +240,30 @@ def ensure_headers() -> dict:
         if not current_headers:
             ws.update("A1", [expected_headers])
             status[ws_name] = status.get(ws_name, "headers_agregados")
-        elif current_headers != expected_headers:
-            status[ws_name] = f"headers_diferentes (actual: {current_headers})"
-        else:
+            continue
+
+        # Detectar columnas faltantes al final
+        missing_at_end = [h for h in expected_headers if h not in current_headers]
+        if missing_at_end:
+            # Append columnas faltantes al final de la fila 1
+            new_headers = list(current_headers) + missing_at_end
+            # Convertir índice a letra de columna (A, B, ..., Z, AA, AB...)
+            def _col_letter(n):
+                s = ""
+                n0 = n
+                while n0 >= 0:
+                    s = chr(ord("A") + n0 % 26) + s
+                    n0 = n0 // 26 - 1
+                return s
+            last_col = _col_letter(len(new_headers) - 1)
+            ws.update(f"A1:{last_col}1", [new_headers])
+            status[ws_name] = f"columnas_agregadas: {missing_at_end}"
+            continue
+
+        if current_headers == expected_headers:
             status[ws_name] = status.get(ws_name, "ok")
+        else:
+            status[ws_name] = f"orden_diferente (actual: {current_headers})"
 
     invalidate_cache()
     return status
