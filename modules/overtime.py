@@ -15,7 +15,7 @@ from core.config import (
 from core.time_utils import today_gt, now_gt, format_date_long, parse_date
 from core.auth import current_user_display_name
 from core.flags import flag_emoji_unicode
-from core.notifications import notify_success, notify_error
+from core.notifications import notify_success, notify_error, notify_warning
 from core.business_logic import (
     ensure_henry_saturdays, get_overtime_matrix, load_overtime_df,
     get_overtime_today, get_overtime_this_week, get_overtime_this_month,
@@ -275,12 +275,15 @@ def _render_register_form(employees_active: pd.DataFrame):
                 except Exception as e:
                     notify_error(str(e))
 
-    # Últimos 10 registros
+    # Últimos 10 registros - Editor inline
     st.divider()
     st.markdown(
         '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
         'text-transform:uppercase;color:#DC2626;margin-bottom:12px;">'
-        '— ÚLTIMOS 10 REGISTROS</div>',
+        '— ÚLTIMOS 10 REGISTROS · EDITABLE</div>'
+        '<div style="font-size:11px;color:#64748B;margin-bottom:8px;">'
+        'Modifica los valores directamente en la tabla. Marca la casilla ✓ y presiona "Eliminar seleccionados" para borrar registros.'
+        '</div>',
         unsafe_allow_html=True,
     )
 
@@ -289,63 +292,181 @@ def _render_register_form(employees_active: pd.DataFrame):
         st.info("📭 No hay horas extras registradas.")
         return
 
-    df = df.sort_values(["fecha_parsed", "timestamp"], ascending=False).head(10)
+    df_recent = df.sort_values(["fecha_parsed", "timestamp"], ascending=False).head(10).copy()
+    df_recent = df_recent.reset_index(drop=True)
 
-    rows_html = []
-    for _, row in df.iterrows():
-        emp_name = row.get("empleado_nombre", "")
-        emp_match = employees_active[employees_active["nombre"] == emp_name]
-        pais = emp_match.iloc[0]["pais"] if not emp_match.empty else ""
-        flag = flag_emoji_unicode(pais)
+    # Construir DataFrame editable
+    editor_df = pd.DataFrame({
+        "_id": df_recent.index.astype(int),  # índice interno (no editable, oculto)
+        "Eliminar": [False] * len(df_recent),
+        "Fecha": pd.to_datetime(df_recent["fecha_parsed"]).dt.date if "fecha_parsed" in df_recent else df_recent["fecha"],
+        "Empleado": df_recent["empleado_nombre"].astype(str),
+        "Horas": pd.to_numeric(df_recent["horas"], errors="coerce").fillna(0).astype(float),
+        "Motivo": df_recent["motivo"].astype(str),
+        "Aprobado por": df_recent["aprobado_por"].astype(str),
+        "Recurrente": df_recent["recurrente"].astype(str).str.upper().isin(["TRUE", "VERDADERO", "SI", "1"]),
+    })
 
-        is_recurrent = str(row.get("recurrente", "")).upper() in ("TRUE", "VERDADERO", "SI", "1")
-        rec_badge = (
-            '<span style="background:#FEF3C7;color:#92400E;padding:2px 6px;'
-            'border-radius:3px;font-size:9px;font-weight:700;letter-spacing:0.5px;'
-            'text-transform:uppercase;margin-left:6px;">RECURRENTE</span>'
-            if is_recurrent else ""
-        )
-
-        horas = row.get("horas", 0)
-        motivo = (row.get("motivo", "") or "")[:60]
-        if len(row.get("motivo", "") or "") > 60:
-            motivo += "..."
-        fecha_str = row["fecha_parsed"].strftime("%d/%m/%Y") if row["fecha_parsed"] else ""
-        aprobado = row.get("aprobado_por", "")
-
-        rows_html.append(
-            f'<tr>'
-            f'<td class="ot-cell ot-mono">{fecha_str}</td>'
-            f'<td class="ot-cell">'
-            f'<span style="margin-right:4px;">{flag}</span>'
-            f'<strong style="font-size:12px;color:#0A0A0A;">{emp_name}</strong>'
-            f'{rec_badge}</td>'
-            f'<td class="ot-cell" style="text-align:center;">'
-            f'<span style="font-size:16px;font-weight:700;color:#D97706;">{horas}</span>'
-            f'<span style="font-size:10px;color:#94A3B8;margin-left:2px;">hrs</span></td>'
-            f'<td class="ot-cell" style="font-size:11px;color:#475569;">{motivo}</td>'
-            f'<td class="ot-cell ot-mono" style="color:#94A3B8;text-transform:uppercase;">{aprobado}</td>'
-            f'</tr>'
-        )
-
-    table_html = (
-        '<style>'
-        '.ot-table{width:100%;border-collapse:collapse;font-family:\'Inter Tight\',sans-serif;}'
-        '.ot-table th{padding:10px 14px;text-align:left;font-size:9px;font-weight:700;'
-        'letter-spacing:1.5px;text-transform:uppercase;color:#94A3B8;'
-        'border-bottom:1px solid #E2E8F0;background:#FAFBFC;}'
-        '.ot-cell{padding:12px 14px;border-bottom:1px solid #F1F5F9;}'
-        '.ot-mono{font-family:\'JetBrains Mono\',monospace;font-size:11px;color:#334155;}'
-        '</style>'
-        '<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:8px;'
-        'overflow:hidden;overflow-x:auto;">'
-        '<table class="ot-table"><thead><tr>'
-        '<th>Fecha</th><th>Empleado</th>'
-        '<th style="text-align:center;">Horas</th>'
-        '<th>Motivo</th><th>Aprobó</th>'
-        '</tr></thead><tbody>' + "".join(rows_html) + '</tbody></table></div>'
+    edited_df = st.data_editor(
+        editor_df,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="fixed",
+        column_config={
+            "_id": None,  # ocultar
+            "Eliminar": st.column_config.CheckboxColumn(
+                "✓",
+                help="Marca para eliminar",
+                default=False,
+                width="small",
+            ),
+            "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY", width="small"),
+            "Empleado": st.column_config.SelectboxColumn(
+                "Empleado",
+                options=sorted(employees_active["nombre"].tolist()) if not employees_active.empty else [],
+                required=True,
+            ),
+            "Horas": st.column_config.NumberColumn(
+                "Horas",
+                min_value=0.0, max_value=24.0, step=0.5, format="%.1f",
+                width="small",
+            ),
+            "Motivo": st.column_config.TextColumn("Motivo"),
+            "Aprobado por": st.column_config.TextColumn("Aprobó", width="small"),
+            "Recurrente": st.column_config.CheckboxColumn("Recurr.", width="small"),
+        },
+        key="overtime_editor",
     )
-    st.markdown(table_html, unsafe_allow_html=True)
+
+    col_save, col_del = st.columns(2)
+
+    with col_del:
+        n_to_delete = int(edited_df["Eliminar"].sum())
+        if st.button(
+            f"🗑️ Eliminar seleccionados ({n_to_delete})",
+            disabled=(n_to_delete == 0),
+            use_container_width=True,
+            key="ot_del_btn",
+            type="secondary",
+        ):
+            try:
+                rows_to_delete = edited_df[edited_df["Eliminar"]].copy()
+                deleted_count = 0
+                ws = get_worksheet(WS_OVERTIME)
+                all_rows = ws.get_all_values()
+
+                for _, dr in rows_to_delete.iterrows():
+                    orig_idx = int(dr["_id"])
+                    target = df_recent.iloc[orig_idx]
+                    target_fecha = target.get("fecha", "")
+                    target_emp = target.get("empleado_nombre", "")
+                    target_horas = str(target.get("horas", ""))
+                    target_ts = str(target.get("timestamp", ""))
+
+                    # Buscar la fila exacta en el sheet por timestamp+empleado+fecha
+                    headers_row = all_rows[0]
+                    try:
+                        idx_fecha = headers_row.index("fecha")
+                        idx_emp = headers_row.index("empleado_nombre")
+                        idx_ts = headers_row.index("timestamp")
+                    except ValueError:
+                        notify_error("Headers del sheet incompletos.")
+                        return
+
+                    target_row_idx = None
+                    for i, srow in enumerate(all_rows[1:], start=2):
+                        if (len(srow) > max(idx_fecha, idx_emp, idx_ts)
+                                and srow[idx_fecha] == str(target_fecha)
+                                and srow[idx_emp] == str(target_emp)
+                                and srow[idx_ts] == target_ts):
+                            target_row_idx = i
+                            break
+
+                    if target_row_idx:
+                        delete_row(WS_OVERTIME, target_row_idx)
+                        deleted_count += 1
+                        # Reload all_rows para mantener los índices correctos
+                        all_rows = get_worksheet(WS_OVERTIME).get_all_values()
+
+                from core.sheets import invalidate_cache
+                invalidate_cache()
+                notify_success(f"{deleted_count} registro(s) eliminado(s).", title="Eliminados")
+                st.rerun()
+            except Exception as e:
+                notify_error(f"Error al eliminar: {e}")
+
+    with col_save:
+        if st.button(
+            "💾 Guardar cambios editados",
+            use_container_width=True,
+            type="primary",
+            key="ot_save_btn",
+        ):
+            try:
+                ws = get_worksheet(WS_OVERTIME)
+                all_rows = ws.get_all_values()
+                headers_row = all_rows[0]
+                try:
+                    idx_fecha = headers_row.index("fecha")
+                    idx_emp_id = headers_row.index("empleado_id")
+                    idx_emp = headers_row.index("empleado_nombre")
+                    idx_horas = headers_row.index("horas")
+                    idx_motivo = headers_row.index("motivo")
+                    idx_aprob = headers_row.index("aprobado_por")
+                    idx_rec = headers_row.index("recurrente")
+                    idx_ts = headers_row.index("timestamp")
+                except ValueError:
+                    notify_error("Headers del sheet incompletos.")
+                    return
+
+                changes = 0
+                for i, edited in edited_df.iterrows():
+                    if edited["Eliminar"]:
+                        continue  # los de Eliminar van por otro botón
+                    orig_idx = int(edited["_id"])
+                    orig = df_recent.iloc[orig_idx]
+
+                    # Comparar si hubo cambios
+                    new_fecha = str(edited["Fecha"])
+                    new_emp_name = str(edited["Empleado"])
+                    new_horas = float(edited["Horas"])
+                    new_motivo = str(edited["Motivo"])
+                    new_aprob = str(edited["Aprobado por"])
+                    new_rec = "TRUE" if edited["Recurrente"] else "FALSE"
+
+                    # Mapear empleado_id por nombre
+                    emp_row_match = employees_active[employees_active["nombre"] == new_emp_name]
+                    new_emp_id = int(emp_row_match.iloc[0]["id"]) if not emp_row_match.empty else orig.get("empleado_id", "")
+
+                    # Encontrar fila original en el sheet
+                    orig_ts = str(orig.get("timestamp", ""))
+                    target_row_idx = None
+                    for j, srow in enumerate(all_rows[1:], start=2):
+                        if (len(srow) > idx_ts and srow[idx_ts] == orig_ts):
+                            target_row_idx = j
+                            break
+                    if target_row_idx is None:
+                        continue
+
+                    # Actualizar cada celda
+                    ws.update_cell(target_row_idx, idx_fecha + 1, new_fecha)
+                    ws.update_cell(target_row_idx, idx_emp_id + 1, new_emp_id)
+                    ws.update_cell(target_row_idx, idx_emp + 1, new_emp_name)
+                    ws.update_cell(target_row_idx, idx_horas + 1, new_horas)
+                    ws.update_cell(target_row_idx, idx_motivo + 1, new_motivo)
+                    ws.update_cell(target_row_idx, idx_aprob + 1, new_aprob)
+                    ws.update_cell(target_row_idx, idx_rec + 1, new_rec)
+                    changes += 1
+
+                from core.sheets import invalidate_cache
+                invalidate_cache()
+                if changes > 0:
+                    notify_success(f"{changes} registro(s) actualizados.", title="Cambios guardados")
+                    st.rerun()
+                else:
+                    notify_warning("No hay cambios para guardar.")
+            except Exception as e:
+                notify_error(f"Error al guardar: {e}")
 
 
 def _render_detail_view(employees_active: pd.DataFrame):
