@@ -251,8 +251,10 @@ def get_current_duration_minutes(hora_inicio_str: str) -> int:
     if not hi:
         return 0
     now = now_gt()
-    start_dt = datetime.combine(now.date(), hi)
-    end_dt = now
+    # Convertir ambos a naive (sin tz) para poder compararlos
+    now_naive = now.replace(tzinfo=None)
+    start_dt = datetime.combine(now_naive.date(), hi)
+    end_dt = now_naive
     if end_dt < start_dt:
         return 0
     return int((end_dt - start_dt).total_seconds() / 60)
