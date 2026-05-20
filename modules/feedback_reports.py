@@ -44,9 +44,10 @@ def render():
         employees_df["activo"].astype(str).str.upper().isin(["TRUE", "VERDADERO", "SI", "1"])
     ].copy() if not employees_df.empty else pd.DataFrame()
 
-    tab_new, tab_history = st.tabs([
+    tab_new, tab_history, tab_dashboard = st.tabs([
         "➕  Nuevo reporte",
         "📜  Historial",
+        "📊  Dashboard de recurrencias",
     ])
 
     with tab_new:
@@ -54,6 +55,9 @@ def render():
 
     with tab_history:
         _render_history(employees_active)
+
+    with tab_dashboard:
+        _render_dashboard(employees_active)
 
 
 def _render_new_report(employees_active: pd.DataFrame):
@@ -211,27 +215,42 @@ def _render_new_report(employees_active: pd.DataFrame):
         st.rerun()
 
     # ============================================================
-    # SECCIÓN 4: REMINDERS GENERALES (bullets)
+    # SECCIÓN 4: REMINDERS GENERALES (bullets con modalidad)
     # ============================================================
     st.markdown(
         '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
         'text-transform:uppercase;color:#DC2626;margin:24px 0 12px 0;">'
-        '— REMINDERS GENERALES AL TEAM'
+        '— REMINDERS AL TEAM'
         '</div>',
         unsafe_allow_html=True,
     )
 
     if st.session_state.report_reminders:
         for idx, rem in enumerate(st.session_state.report_reminders):
-            c1, c2 = st.columns([10, 0.5])
+            # Migración legacy: si era string, convertir a dict
+            if isinstance(rem, str):
+                rem = {"texto": rem, "modalidad": "GRUPAL"}
+                st.session_state.report_reminders[idx] = rem
+
+            c1, c2, c3 = st.columns([7, 2.5, 0.5])
             with c1:
-                st.session_state.report_reminders[idx] = st.text_input(
+                rem["texto"] = st.text_input(
                     f"Reminder {idx+1}",
-                    value=rem,
-                    key=f"rem_{idx}",
+                    value=rem.get("texto", ""),
+                    key=f"rem_txt_{idx}",
                     label_visibility="collapsed",
                 )
             with c2:
+                rem["modalidad"] = st.radio(
+                    f"Modalidad {idx+1}",
+                    options=["GRUPAL", "INDIVIDUAL"],
+                    format_func=lambda x: "👥 Grupal" if x == "GRUPAL" else "👤 Individual",
+                    horizontal=True,
+                    index=0 if rem.get("modalidad", "GRUPAL") == "GRUPAL" else 1,
+                    key=f"rem_mod_{idx}",
+                    label_visibility="collapsed",
+                )
+            with c3:
                 if st.button("🗑", key=f"rem_del_{idx}"):
                     st.session_state.report_reminders.pop(idx)
                     st.rerun()
@@ -239,7 +258,7 @@ def _render_new_report(employees_active: pd.DataFrame):
         st.caption("No hay reminders registrados todavía.")
 
     if st.button("➕  Agregar reminder", key="add_rem", use_container_width=True):
-        st.session_state.report_reminders.append("")
+        st.session_state.report_reminders.append({"texto": "", "modalidad": "GRUPAL"})
         st.rerun()
 
     # ============================================================
@@ -362,7 +381,13 @@ def _render_history(employees_active: pd.DataFrame):
             if reminders:
                 st.markdown("**Reminders al team:**")
                 for r in reminders:
-                    st.markdown(f"- {r}")
+                    if isinstance(r, dict):
+                        texto = r.get("texto", "")
+                        modalidad = r.get("modalidad", "GRUPAL")
+                        icon = "👥" if modalidad == "GRUPAL" else "👤"
+                        st.markdown(f"- {icon} **[{modalidad.capitalize()}]** {texto}")
+                    else:
+                        st.markdown(f"- {r}")
 
             # Botón descargar PDF
             pdf_buffer = _generate_report_pdf(
@@ -382,6 +407,255 @@ def _render_history(employees_active: pd.DataFrame):
                     mime="application/pdf",
                     key=f"hist_pdf_{rep_id}",
                 )
+
+
+def _render_dashboard(employees_active: pd.DataFrame):
+    """Dashboard de agregados: top dudosos y top dudas recurrentes."""
+    try:
+        df = read_worksheet(WS_FEEDBACK_REPORTS)
+    except Exception as e:
+        st.error(f"Error: {e}")
+        return
+
+    if df.empty:
+        st.info("📭 No hay reportes guardados. El dashboard se genera al haber al menos un reporte.")
+        return
+
+    # Parsear fechas y reportes
+    df["fecha_parsed"] = df["fecha"].apply(parse_date)
+    df = df[df["fecha_parsed"].notna()].copy()
+
+    # Agregar todas las dudas y feedbacks de todos los reportes
+    all_dudas = []
+    all_feedbacks = []
+    all_reminders = []
+    for _, row in df.iterrows():
+        try:
+            dudas_list = json.loads(row.get("dudas_json", "[]") or "[]")
+            for d in dudas_list:
+                all_dudas.append({
+                    "fecha": row["fecha_parsed"],
+                    "empleado": d.get("empleado", ""),
+                    "duda": d.get("duda", ""),
+                    "resolucion": d.get("resolucion", ""),
+                })
+        except Exception:
+            pass
+        try:
+            fb_list = json.loads(row.get("feedbacks_json", "[]") or "[]")
+            for fb in fb_list:
+                all_feedbacks.append({
+                    "fecha": row["fecha_parsed"],
+                    "empleado": fb.get("empleado", ""),
+                    "feedback": fb.get("feedback", ""),
+                })
+        except Exception:
+            pass
+        try:
+            rem_list = json.loads(row.get("reminders_json", "[]") or "[]")
+            for r in rem_list:
+                if isinstance(r, dict):
+                    all_reminders.append(r)
+                else:
+                    all_reminders.append({"texto": str(r), "modalidad": "GRUPAL"})
+        except Exception:
+            pass
+
+    if not all_dudas and not all_feedbacks:
+        st.info("📭 Aún no hay dudas ni feedbacks registrados para agregar.")
+        return
+
+    # KPIs del dashboard
+    n_reportes = len(df)
+    n_dudas = len(all_dudas)
+    n_feedbacks = len(all_feedbacks)
+    n_reminders = len(all_reminders)
+
+    kpi_html = f"""
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 24px 0;">
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:8px;">REPORTES</div>
+            <div style="font-size:32px;font-weight:700;color:#0A0A0A;line-height:1;letter-spacing:-1px;">{n_reportes}</div>
+        </div>
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:8px;">DUDAS</div>
+            <div style="font-size:32px;font-weight:700;color:#3B82F6;line-height:1;letter-spacing:-1px;">{n_dudas}</div>
+        </div>
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:8px;">FEEDBACKS</div>
+            <div style="font-size:32px;font-weight:700;color:#16A34A;line-height:1;letter-spacing:-1px;">{n_feedbacks}</div>
+        </div>
+        <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#64748B;margin-bottom:8px;">REMINDERS</div>
+            <div style="font-size:32px;font-weight:700;color:#D97706;line-height:1;letter-spacing:-1px;">{n_reminders}</div>
+        </div>
+    </div>
+    """
+    st.markdown(kpi_html, unsafe_allow_html=True)
+
+    col_left, col_right = st.columns(2)
+
+    # ============================================================
+    # TOP AGENTES CON MÁS DUDAS
+    # ============================================================
+    with col_left:
+        st.markdown(
+            '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+            'text-transform:uppercase;color:#DC2626;margin:8px 0 12px 0;">'
+            '🥇 — TOP AGENTES POR DUDAS'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        if not all_dudas:
+            st.caption("Sin dudas registradas.")
+        else:
+            df_dudas = pd.DataFrame(all_dudas)
+            counts = df_dudas[df_dudas["empleado"] != ""].groupby("empleado").size().reset_index(name="cantidad")
+            counts = counts.sort_values("cantidad", ascending=False).reset_index(drop=True)
+
+            max_val = int(counts["cantidad"].max()) if not counts.empty else 1
+            medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+
+            cards = []
+            for i, row in counts.iterrows():
+                emp_name = row["empleado"]
+                cantidad = int(row["cantidad"])
+                pct = (cantidad / max_val) * 100
+                medal = medals.get(i, f"#{i+1}")
+
+                emp_match = employees_active[employees_active["nombre"] == emp_name] if not employees_active.empty else pd.DataFrame()
+                pais = emp_match.iloc[0]["pais"] if not emp_match.empty else ""
+                flag = flag_emoji_unicode(pais)
+
+                cards.append(f'''
+                <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;
+                            padding:14px 16px;margin-bottom:8px;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <div style="font-size:20px;font-weight:800;color:#94A3B8;min-width:32px;text-align:center;">{medal}</div>
+                        <span style="font-size:18px;">{flag}</span>
+                        <div style="flex:1;">
+                            <div style="font-size:13px;font-weight:700;color:#0A0A0A;">{emp_name}</div>
+                        </div>
+                        <div style="text-align:right;min-width:60px;">
+                            <div style="font-size:18px;font-weight:700;color:#3B82F6;line-height:1;
+                                        font-family:'JetBrains Mono',monospace;">{cantidad}</div>
+                            <div style="font-size:9px;color:#94A3B8;letter-spacing:1px;
+                                        text-transform:uppercase;margin-top:2px;">duda{'s' if cantidad != 1 else ''}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px;background:#F1F5F9;height:6px;border-radius:3px;overflow:hidden;">
+                        <div style="background:#3B82F6;height:100%;width:{pct}%;"></div>
+                    </div>
+                </div>
+                ''')
+            st.markdown("".join(cards), unsafe_allow_html=True)
+
+    # ============================================================
+    # TOP DUDAS RECURRENTES (palabras clave)
+    # ============================================================
+    with col_right:
+        st.markdown(
+            '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+            'text-transform:uppercase;color:#DC2626;margin:8px 0 12px 0;">'
+            '🔁 — DUDAS RECURRENTES (PALABRAS CLAVE)'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        if not all_dudas:
+            st.caption("Sin dudas registradas.")
+        else:
+            # Detectar palabras clave (más de 4 chars, no comunes)
+            stop_words = {
+                "para", "como", "donde", "cuando", "porque", "pero", "este", "esto",
+                "esta", "estos", "estas", "tiene", "tienen", "hace", "hacer", "puede",
+                "pueden", "tengo", "tener", "todos", "todas", "sobre", "entre", "desde",
+                "hasta", "muy", "que", "los", "las", "una", "uno", "del", "con", "por",
+                "fue", "han", "ser", "the", "and", "for", "she", "her",
+            }
+            from collections import Counter
+            import re
+
+            word_counts = Counter()
+            for d in all_dudas:
+                texto = (d.get("duda") or "").lower()
+                # Limpiar: solo letras
+                texto = re.sub(r"[^\wáéíóúñ ]", " ", texto)
+                for word in texto.split():
+                    if len(word) >= 5 and word not in stop_words:
+                        word_counts[word] += 1
+
+            top = word_counts.most_common(10)
+            if not top:
+                st.caption("No se identificaron palabras recurrentes.")
+            else:
+                max_val = top[0][1]
+                cards = []
+                for i, (word, count) in enumerate(top):
+                    pct = (count / max_val) * 100
+                    cards.append(f'''
+                    <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;
+                                padding:12px 14px;margin-bottom:6px;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <div style="font-size:13px;font-weight:700;color:#0A0A0A;flex:1;
+                                        text-transform:capitalize;">{word}</div>
+                            <div style="text-align:right;min-width:50px;">
+                                <span style="font-size:14px;font-weight:700;color:#F97316;
+                                            font-family:'JetBrains Mono',monospace;">{count}</span>
+                                <span style="font-size:9px;color:#94A3B8;letter-spacing:0.5px;
+                                            margin-left:3px;">veces</span>
+                            </div>
+                        </div>
+                        <div style="margin-top:6px;background:#F1F5F9;height:4px;border-radius:2px;overflow:hidden;">
+                            <div style="background:#F97316;height:100%;width:{pct}%;"></div>
+                        </div>
+                    </div>
+                    ''')
+                st.markdown("".join(cards), unsafe_allow_html=True)
+
+    # ============================================================
+    # TOP AGENTES CON MÁS FEEDBACKS (debajo)
+    # ============================================================
+    if all_feedbacks:
+        st.markdown(
+            '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+            'text-transform:uppercase;color:#DC2626;margin:24px 0 12px 0;">'
+            '💬 — AGENTES POR CANTIDAD DE FEEDBACKS RECIBIDOS'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        df_fb = pd.DataFrame(all_feedbacks)
+        counts_fb = df_fb[df_fb["empleado"] != ""].groupby("empleado").size().reset_index(name="cantidad")
+        counts_fb = counts_fb.sort_values("cantidad", ascending=False).reset_index(drop=True)
+
+        if counts_fb.empty:
+            st.caption("Sin feedbacks individualizados.")
+        else:
+            max_val = int(counts_fb["cantidad"].max())
+            cards = []
+            for i, row in counts_fb.iterrows():
+                emp_name = row["empleado"]
+                cantidad = int(row["cantidad"])
+                pct = (cantidad / max_val) * 100
+                emp_match = employees_active[employees_active["nombre"] == emp_name] if not employees_active.empty else pd.DataFrame()
+                pais = emp_match.iloc[0]["pais"] if not emp_match.empty else ""
+                flag = flag_emoji_unicode(pais)
+
+                cards.append(f'''
+                <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:6px;
+                            padding:12px 16px;margin-bottom:6px;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <span style="font-size:16px;">{flag}</span>
+                        <div style="flex:1;font-size:13px;font-weight:700;color:#0A0A0A;">{emp_name}</div>
+                        <div style="font-size:16px;font-weight:700;color:#16A34A;
+                                    font-family:'JetBrains Mono',monospace;">{cantidad}</div>
+                    </div>
+                    <div style="margin-top:6px;background:#F1F5F9;height:4px;border-radius:2px;overflow:hidden;">
+                        <div style="background:#16A34A;height:100%;width:{pct}%;"></div>
+                    </div>
+                </div>
+                ''')
+            st.markdown("".join(cards), unsafe_allow_html=True)
 
 
 def _generate_report_pdf(titulo, fecha_reporte, autor, dudas, observaciones, feedbacks, reminders):
@@ -471,8 +745,21 @@ def _generate_report_pdf(titulo, fecha_reporte, autor, dudas, observaciones, fee
     if reminders:
         story.append(Paragraph("— REMINDERS AL TEAM", section_style))
         for r in reminders:
-            if r.strip():
-                story.append(Paragraph("• " + _escape(r), bullet_style))
+            # Soportar tanto formato viejo (string) como nuevo (dict)
+            if isinstance(r, dict):
+                texto = r.get("texto", "")
+                modalidad = r.get("modalidad", "GRUPAL")
+                if not texto.strip():
+                    continue
+                icon = "👥" if modalidad == "GRUPAL" else "👤"
+                mod_label = "Grupal" if modalidad == "GRUPAL" else "Individual"
+                story.append(Paragraph(
+                    f"• [{icon} {mod_label}] {_escape(texto)}",
+                    bullet_style,
+                ))
+            else:
+                if r and str(r).strip():
+                    story.append(Paragraph("• " + _escape(str(r)), bullet_style))
 
     # Footer
     story.append(Spacer(1, 0.4*inch))
