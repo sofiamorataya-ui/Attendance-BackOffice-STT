@@ -31,6 +31,31 @@ def inject_css():
         background: linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
     }
 
+    /* === Eliminar gaps entre components.html() consecutivos en el dashboard === */
+    /* Streamlit por defecto agrega margen vertical entre iframes; lo quitamos */
+    [data-testid="stIFrame"] {
+        display: block !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 0 !important;
+    }
+    iframe[title="streamlit_components.v1.html.html"] {
+        display: block !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    /* Quitar también el gap del contenedor padre del iframe */
+    .element-container:has(> [data-testid="stIFrame"]) {
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 0 !important;
+    }
+    /* Quitar gap del vertical block que contiene los iframes apilados */
+    [data-testid="stVerticalBlock"] [data-testid="stIFrame"] {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+    }
+
     /* === Header bar STT (top de cada vista) === */
     .stt-header {
         background: #0F172A;
