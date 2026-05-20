@@ -434,36 +434,36 @@ body {
     pointer-events: none;
 }
 
-/* === Tooltip custom (hover) - debajo de la barra === */
+/* === Tooltip custom (hover) - ARRIBA de la barra para iframe compacto === */
 .stt-incident-tooltip {
     position: absolute;
-    top: calc(100% + 8px);
+    bottom: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%);
     background: #0F172A;
     color: #FFFFFF;
-    padding: 10px 14px;
+    padding: 8px 12px;
     border-radius: 6px;
     font-family: 'Inter Tight', sans-serif;
-    font-size: 11px;
-    line-height: 1.5;
+    font-size: 10px;
+    line-height: 1.4;
     white-space: nowrap;
     box-shadow: 0 8px 24px rgba(0,0,0,0.25);
     opacity: 0;
     pointer-events: none;
     z-index: 100;
     transition: opacity 0.15s ease;
-    min-width: 180px;
+    min-width: 170px;
 }
 .stt-incident-tooltip::after {
     content: '';
     position: absolute;
-    bottom: 100%;
+    top: 100%;
     left: 50%;
     transform: translateX(-50%);
     border-width: 6px;
     border-style: solid;
-    border-color: transparent transparent #0F172A transparent;
+    border-color: #0F172A transparent transparent transparent;
 }
 .stt-incident-overlay:hover .stt-incident-tooltip {
     opacity: 1;
@@ -1176,12 +1176,13 @@ def _render_employee_row_with_form(status_data: dict):
     col_row, col_btn = st.columns([20, 1])
 
     with col_row:
-        components.html(full_row_html, height=140, scrolling=False)
+        components.html(full_row_html, height=75, scrolling=False)
 
     active_inc = status_data.get("active_incident")
 
     with col_btn:
-        st.markdown("<div style='padding-top:55px;'></div>", unsafe_allow_html=True)
+        # Padding-top alineado con el centro vertical de la barra (~28px desde el top del iframe)
+        st.markdown("<div style='padding-top:18px;'></div>", unsafe_allow_html=True)
         if active_inc:
             # Hay incidencia ACTIVA → botón "■" para terminarla
             button_clicked_terminate = st.button(
