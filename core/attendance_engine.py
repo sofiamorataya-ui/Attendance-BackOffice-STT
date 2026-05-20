@@ -210,15 +210,23 @@ def compute_employee_status(
                              note=f"Vacaciones · {vacation_row.get('tipo', '')}")
 
     # ============================================================
-    # PRIORIDAD 2: Permiso o incapacidad
+    # PRIORIDAD 2: Permiso o incapacidad (SOLO DÍA COMPLETO)
+    # Los permisos parciales (PARCIAL_CON_FIN, PARCIAL_ABIERTO) NO cambian
+    # el status del empleado — siguen WORKING y se pintan como overlay morado
     # ============================================================
     if permit_row is not None:
-        permit_type = str(permit_row.get("tipo", "")).upper()
-        if permit_type == "INCAPACIDAD_MEDICA":
-            return _build_status(result, Status.SICK,
-                                 note=permit_row.get("motivo", "Incapacidad médica"))
-        return _build_status(result, Status.PERMIT,
-                             note=permit_row.get("motivo", "Permiso"))
+        modalidad = str(permit_row.get("modalidad", "")).upper().strip()
+        # Solo considerar como PERMIT global si es día completo (o no tiene modalidad)
+        if modalidad in ("", "DIA_COMPLETO"):
+            permit_type = str(permit_row.get("tipo", "")).upper()
+            if permit_type == "INCAPACIDAD_MEDICA":
+                return _build_status(result, Status.SICK,
+                                     note=permit_row.get("motivo", "Incapacidad médica"))
+            return _build_status(result, Status.PERMIT,
+                                 note=permit_row.get("motivo", "Permiso"))
+        # Si es PARCIAL: NO retornamos aquí, dejamos que el empleado siga
+        # con su flujo normal (WORKING/DAY_OFF/etc.). El overlay morado del
+        # permiso parcial ya se pinta en el timeline via day_partial_permits.
 
     # ============================================================
     # PRIORIDAD 3: Día libre programado
@@ -409,6 +417,13 @@ def get_all_statuses(target_date: Optional[date] = None) -> list[dict]:
     else:
         day_incidents_df = pd.DataFrame()
 
+    # Cargar permisos parciales (modalidad PARCIAL_CON_FIN o PARCIAL_ABIERTO) del día
+    try:
+        from modules.exceptions import load_partial_permits_for_date
+        day_partial_permits_df = load_partial_permits_for_date(target_date)
+    except Exception:
+        day_partial_permits_df = pd.DataFrame()
+
     result = []
     for _, emp in employees.iterrows():
         emp_id = int(emp["id"])
@@ -467,6 +482,36 @@ def get_all_statuses(target_date: Optional[date] = None) -> list[dict]:
                 })
 
         status["day_incidents"] = emp_incidents
+
+        # ============================================================
+        # Inyectar permisos PARCIALES del día (con barra morada en timeline)
+        # ============================================================
+        emp_partial_permits = []
+        if not day_partial_permits_df.empty:
+            permit_match = day_partial_permits_df[
+                day_partial_permits_df["empleado_id"].astype(int) == emp_id
+            ]
+            for _, perm in permit_match.iterrows():
+                modalidad = str(perm.get("modalidad", ""))
+                estado = str(perm.get("estado", "")).upper()
+                hi_str = str(perm.get("hora_inicio", "") or "")
+                hf_str = str(perm.get("hora_fin", "") or "")
+                # Si está ABIERTO sin hora_fin, usar la hora actual
+                if modalidad == "PARCIAL_ABIERTO" and not hf_str:
+                    hf_str = current_time_gt().strftime("%H:%M")
+                emp_partial_permits.append({
+                    "id_permiso": str(perm.get("id_permiso", "")),
+                    "tipo": str(perm.get("tipo", "")),
+                    "motivo": str(perm.get("motivo", "") or ""),
+                    "hora_inicio": hi_str,
+                    "hora_fin": hf_str,
+                    "modalidad": modalidad,
+                    "estado": estado,
+                    "color": "#8B5CF6",  # Morado para permisos parciales
+                    "icon": "🚦",
+                    "label": "PERMISO",
+                })
+        status["day_partial_permits"] = emp_partial_permits
 
         # Mantener compatibilidad: active_incident sigue siendo la primera activa
         active_inc = None
