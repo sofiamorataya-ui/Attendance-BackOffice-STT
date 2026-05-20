@@ -127,9 +127,8 @@ def load_permits_for_date(target_date: Optional[date] = None) -> pd.DataFrame:
     """
     Permisos DE DÍA COMPLETO activos en una fecha (rango fecha_inicio → fecha_fin).
 
-    IMPORTANTE: solo retorna permisos con modalidad DIA_COMPLETO o sin modalidad (legacy).
-    Los permisos PARCIAL_CON_FIN y PARCIAL_ABIERTO se cargan vía load_partial_permits_for_date
-    para evitar que oscurezcan el día completo del empleado en el timeline.
+    IMPORTANTE: solo retorna permisos con modalidad EXACTA "DIA_COMPLETO" o sin modalidad (legacy).
+    Los permisos PARCIAL_CON_FIN y PARCIAL_ABIERTO se cargan vía load_partial_permits_for_date.
     """
     target_date = target_date or today_gt()
     df = read_worksheet(WS_PERMITS)
@@ -139,9 +138,21 @@ def load_permits_for_date(target_date: Optional[date] = None) -> pd.DataFrame:
     df["fi_parsed"] = df["fecha_inicio"].apply(parse_date)
     df["ff_parsed"] = df["fecha_fin"].apply(parse_date)
 
-    # Filtrar solo DIA_COMPLETO o sin modalidad (legacy)
+    # Filtrar solo DIA_COMPLETO (con normalización estricta) o vacío (legacy)
     if "modalidad" in df.columns:
-        df = df[df["modalidad"].fillna("").astype(str).str.upper().isin(["", "DIA_COMPLETO"])].copy()
+        # Normalizar: convertir a string, hacer strip, mayúsculas
+        def _norm_mod(v):
+            try:
+                if v is None:
+                    return ""
+                s = str(v).strip().upper()
+                return s
+            except Exception:
+                return ""
+        df["_modalidad_norm"] = df["modalidad"].apply(_norm_mod)
+        # Solo dejar DIA_COMPLETO exacto O vacío (legacy)
+        df = df[df["_modalidad_norm"].isin(["", "DIA_COMPLETO"])].copy()
+        df = df.drop(columns=["_modalidad_norm"])
 
     mask = df.apply(
         lambda r: r["fi_parsed"] is not None and r["ff_parsed"] is not None
