@@ -83,6 +83,117 @@ def render():
     """
     st.markdown(kpi_html, unsafe_allow_html=True)
 
+    # ============================================================
+    # PANEL DIAGNÓSTICO EN VIVO (raíz del bug visual)
+    # ============================================================
+    with st.expander("🔬 DIAGNÓSTICO: ¿Qué permisos hay para HOY en el Sheet?", expanded=True):
+        st.caption(
+            "Este panel muestra TODOS los permisos del Sheet `Permisos` que aplican a HOY, "
+            "exactamente como Python los lee. Sirve para identificar permisos legacy o registros "
+            "que estén causando que la barra azul cubra todo el día."
+        )
+
+        diag_df = permits_df.copy()
+        if diag_df.empty:
+            st.success("✅ No hay permisos en el Sheet. El bug no puede venir de aquí.")
+        else:
+            # Filtrar solo los que tocan HOY
+            diag_df["fi_parsed"] = diag_df["fecha_inicio"].apply(parse_date)
+            diag_df["ff_parsed"] = diag_df["fecha_fin"].apply(parse_date)
+            mask_today = diag_df.apply(
+                lambda r: r["fi_parsed"] is not None and r["ff_parsed"] is not None
+                          and r["fi_parsed"] <= today <= r["ff_parsed"],
+                axis=1,
+            )
+            today_permits = diag_df[mask_today].copy()
+
+            if today_permits.empty:
+                st.success("✅ No hay ningún permiso que toque HOY. La barra azul NO debería estar.")
+            else:
+                st.warning(
+                    f"⚠️ Hay **{len(today_permits)} permiso(s)** que tocan hoy ({today.strftime('%d/%m/%Y')}). "
+                    f"Revisa cada uno:"
+                )
+
+                for idx, row in today_permits.iterrows():
+                    emp = row.get("empleado_nombre", "?")
+                    emp_id = row.get("empleado_id", "?")
+                    fi = row.get("fecha_inicio", "?")
+                    ff = row.get("fecha_fin", "?")
+                    tipo = row.get("tipo", "?")
+                    motivo = row.get("motivo", "")
+                    modalidad_raw = row.get("modalidad", "")
+                    modalidad_norm = str(modalidad_raw).strip().upper() if modalidad_raw is not None else ""
+                    hi = row.get("hora_inicio", "")
+                    hf = row.get("hora_fin", "")
+                    estado = row.get("estado", "")
+                    id_perm = row.get("id_permiso", "")
+
+                    # Clasificar
+                    if modalidad_norm == "DIA_COMPLETO":
+                        bg = "#E0E7FF"
+                        label = "📅 DÍA COMPLETO → pinta toda la barra azul"
+                        color = "#3730A3"
+                    elif modalidad_norm == "PARCIAL_CON_FIN":
+                        bg = "#DBEAFE"
+                        label = "⏱ PARCIAL CON FIN → solo pinta el rango horario"
+                        color = "#1E40AF"
+                    elif modalidad_norm == "PARCIAL_ABIERTO":
+                        bg = "#FEF3C7"
+                        label = "▶ PARCIAL ABIERTO → solo pinta desde hora inicio hasta ahora"
+                        color = "#92400E"
+                    elif modalidad_norm == "":
+                        bg = "#FEE2E2"
+                        label = "⚠️ SIN MODALIDAD → se interpreta como día completo → pinta toda la barra"
+                        color = "#991B1B"
+                    else:
+                        bg = "#FECACA"
+                        label = f"❌ MODALIDAD DESCONOCIDA: '{modalidad_raw}' → puede causar bug"
+                        color = "#991B1B"
+
+                    st.markdown(
+                        f'<div style="background:{bg};border-left:4px solid {color};'
+                        f'padding:12px 16px;border-radius:0 6px 6px 0;margin-bottom:8px;'
+                        f'font-family:\'JetBrains Mono\',monospace;font-size:12px;color:#0A0A0A;">'
+                        f'<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:{color};">{label}</div>'
+                        f'<b>Empleado:</b> {emp} (id={emp_id})<br>'
+                        f'<b>Tipo:</b> {tipo} · <b>Motivo:</b> {motivo}<br>'
+                        f'<b>Fechas:</b> {fi} → {ff}<br>'
+                        f'<b>Modalidad raw del Sheet:</b> "<code>{modalidad_raw}</code>" '
+                        f'(normalizado: "<code>{modalidad_norm}</code>")<br>'
+                        f'<b>Hora inicio:</b> "<code>{hi}</code>" · <b>Hora fin:</b> "<code>{hf}</code>" · '
+                        f'<b>Estado:</b> "<code>{estado}</code>"<br>'
+                        f'<b>ID permiso:</b> <code>{id_perm}</code>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                # Mostrar headers exactos del Sheet
+                st.divider()
+                st.caption("**Headers actuales del Sheet `Permisos`:**")
+                from core.sheets import get_worksheet
+                try:
+                    ws = get_worksheet(WS_PERMITS)
+                    sheet_headers = ws.row_values(1)
+                    st.code(" | ".join(repr(h) for h in sheet_headers), language="text")
+
+                    expected = [
+                        "empleado_id", "empleado_nombre", "fecha_inicio", "fecha_fin",
+                        "tipo", "motivo", "aprobado_por", "timestamp",
+                        "modalidad", "hora_inicio", "hora_fin", "estado", "id_permiso",
+                    ]
+                    if sheet_headers != expected:
+                        st.error(
+                            f"❌ Los headers NO coinciden con lo esperado. Esto puede causar que "
+                            f"Python lea las columnas en el orden incorrecto.\n\n"
+                            f"**Esperado:** {expected}\n\n"
+                            f"**Actual:** {sheet_headers}"
+                        )
+                    else:
+                        st.success("✅ Los headers del Sheet coinciden exactamente con lo esperado.")
+                except Exception as e:
+                    st.error(f"No pude leer headers: {e}")
+
     tab_new, tab_history = st.tabs(["➕  Nuevo registro", "📜  Histórico"])
 
     with tab_new:
