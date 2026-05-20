@@ -48,6 +48,38 @@ def render():
         except Exception as e:
             st.error(f"Error: {e}")
 
+    if st.button("🔍 Diagnosticar problemas en headers"):
+        from core.sheets import diagnose_all_headers
+        try:
+            results = diagnose_all_headers()
+            n_ok = sum(1 for r in results if r["status"] == "OK")
+            n_warn = sum(1 for r in results if r["status"] == "WARN")
+            n_err = sum(1 for r in results if r["status"] == "ERROR")
+
+            if n_warn == 0 and n_err == 0:
+                st.success(f"✅ Todas las {n_ok} worksheets están sanas.")
+            else:
+                st.warning(f"⚠️ {n_warn} con problemas · {n_err} con errores · {n_ok} OK")
+
+            for r in results:
+                icon = {"OK": "✅", "WARN": "⚠️", "ERROR": "❌"}[r["status"]]
+                with st.expander(
+                    f"{icon}  {r['worksheet']}",
+                    expanded=(r["status"] != "OK"),
+                ):
+                    if r["issues"]:
+                        for issue in r["issues"]:
+                            st.markdown(f"- ❗ {issue}")
+                    else:
+                        st.caption("Sin problemas detectados.")
+                    st.caption("**Headers actuales en el Sheet:**")
+                    st.code(" | ".join(repr(h) for h in r["headers_actual"]))
+                    if r["headers_esperados"]:
+                        st.caption("**Headers esperados:**")
+                        st.code(" | ".join(r["headers_esperados"]))
+        except Exception as e:
+            st.error(f"Error al diagnosticar: {e}")
+
     st.divider()
 
     # --- Empleados ---
