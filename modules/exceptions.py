@@ -308,7 +308,23 @@ def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
         st.info("📭 No hay permisos registrados todavía.")
         return
 
-    col1, col2, _ = st.columns([1.3, 1.3, 1])
+    # ============================================================
+    # WARNING: Permisos sin modalidad (legacy → considerados DÍA COMPLETO)
+    # ============================================================
+    if "modalidad" in df.columns:
+        legacy_mask = df["modalidad"].fillna("").astype(str).str.strip() == ""
+        n_legacy = int(legacy_mask.sum())
+        if n_legacy > 0:
+            st.warning(
+                f"⚠️ Hay **{n_legacy} permiso(s) sin modalidad** (registros viejos). "
+                f"Estos se interpretan como DÍA COMPLETO y oscurecen toda la barra del empleado en el dashboard. "
+                f"Si alguno corresponde a un permiso por horas, **elimínalo** abajo y vuelve a crearlo con modalidad correcta."
+            )
+
+    # ============================================================
+    # FILTROS
+    # ============================================================
+    col1, col2, col3 = st.columns([1.3, 1.3, 1.3])
     with col1:
         emp_filter = st.selectbox(
             "Empleado",
@@ -322,12 +338,23 @@ def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
             format_func=lambda x: "Todos" if x == "Todos" else PERMIT_LABELS.get(x, x),
             key="per_hist_type",
         )
+    with col3:
+        modality_filter = st.selectbox(
+            "Modalidad",
+            options=["Todas", "DIA_COMPLETO", "PARCIAL_CON_FIN", "PARCIAL_ABIERTO", "(sin modalidad)"],
+            key="per_hist_mod",
+        )
 
     filtered = df.copy()
     if emp_filter != "Todos":
         filtered = filtered[filtered["empleado_nombre"] == emp_filter]
     if type_filter != "Todos":
         filtered = filtered[filtered["tipo"] == type_filter]
+    if modality_filter != "Todas":
+        if modality_filter == "(sin modalidad)":
+            filtered = filtered[filtered.get("modalidad", "").fillna("").astype(str).str.strip() == ""]
+        else:
+            filtered = filtered[filtered.get("modalidad", "").astype(str) == modality_filter]
 
     if filtered.empty:
         st.info("🔎 Sin resultados.")
@@ -335,6 +362,9 @@ def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
 
     filtered = filtered.sort_values("fi_parsed", ascending=False).reset_index(drop=True)
 
+    # ============================================================
+    # TABLA con columna modalidad y horario
+    # ============================================================
     rows_html = []
     for _, row in filtered.iterrows():
         emp_name = row.get("empleado_nombre", "")
@@ -351,7 +381,46 @@ def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
         days = (row["ff_parsed"] - row["fi_parsed"]).days + 1 if row["fi_parsed"] and row["ff_parsed"] else 0
         rango = f"{fi}" if fi == ff else f"{fi} → {ff}"
 
-        # Activo si hoy está en el rango
+        # Modalidad
+        modalidad = str(row.get("modalidad", "") or "").strip()
+        hi = str(row.get("hora_inicio", "") or "")
+        hf = str(row.get("hora_fin", "") or "")
+
+        if not modalidad:
+            mod_html = (
+                '<span style="display:inline-block;padding:3px 8px;border-radius:3px;'
+                'background:#FEE2E2;color:#991B1B;font-size:9px;font-weight:700;'
+                'letter-spacing:0.5px;text-transform:uppercase;">⚠ SIN MODALIDAD</span>'
+                '<div style="font-size:10px;color:#94A3B8;margin-top:2px;">→ se toma como día completo</div>'
+            )
+        elif modalidad == "DIA_COMPLETO":
+            mod_html = (
+                '<span style="display:inline-block;padding:3px 8px;border-radius:3px;'
+                'background:#E0E7FF;color:#3730A3;font-size:9px;font-weight:700;'
+                'letter-spacing:0.5px;text-transform:uppercase;">📅 DÍA COMPLETO</span>'
+            )
+        elif modalidad == "PARCIAL_CON_FIN":
+            mod_html = (
+                '<span style="display:inline-block;padding:3px 8px;border-radius:3px;'
+                'background:#DBEAFE;color:#1E40AF;font-size:9px;font-weight:700;'
+                'letter-spacing:0.5px;text-transform:uppercase;">⏱ PARCIAL</span>'
+                f'<div style="font-size:11px;color:#475569;margin-top:2px;font-family:\'JetBrains Mono\',monospace;">'
+                f'{hi} → {hf}</div>'
+            )
+        elif modalidad == "PARCIAL_ABIERTO":
+            estado = str(row.get("estado", "") or "").upper()
+            estado_badge = "ACTIVO" if estado == "ACTIVO" else "CERRADO"
+            estado_color = "#16A34A" if estado == "ACTIVO" else "#94A3B8"
+            mod_html = (
+                '<span style="display:inline-block;padding:3px 8px;border-radius:3px;'
+                'background:#FEF3C7;color:#92400E;font-size:9px;font-weight:700;'
+                'letter-spacing:0.5px;text-transform:uppercase;">▶ ABIERTO</span>'
+                f'<div style="font-size:11px;color:#475569;margin-top:2px;font-family:\'JetBrains Mono\',monospace;">'
+                f'{hi} → {hf or "?"} <span style="color:{estado_color};">· {estado_badge}</span></div>'
+            )
+        else:
+            mod_html = f'<span style="color:#94A3B8;font-size:10px;">{modalidad}</span>'
+
         is_active = row["fi_parsed"] <= today_gt() <= row["ff_parsed"]
         active_badge = (
             '<span style="background:#16A34A22;color:#15803D;padding:2px 6px;'
@@ -363,7 +432,6 @@ def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
         motivo = (row.get("motivo", "") or "")[:80]
         if len(row.get("motivo", "") or "") > 80:
             motivo += "..."
-        aprobado = row.get("aprobado_por", "")
 
         rows_html.append(
             f'<tr>'
@@ -375,8 +443,8 @@ def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
             f'<span style="display:inline-block;padding:4px 10px;border-radius:3px;font-size:10px;'
             f'font-weight:700;letter-spacing:0.5px;text-transform:uppercase;'
             f'background:{tipo_color}22;color:{tipo_color};">{tipo_label}</span></td>'
+            f'<td class="per-cell">{mod_html}</td>'
             f'<td class="per-cell" style="font-size:12px;color:#475569;">{motivo}</td>'
-            f'<td class="per-cell per-mono" style="color:#94A3B8;text-transform:uppercase;">{aprobado}</td>'
             f'</tr>'
         )
 
@@ -386,44 +454,70 @@ def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
         '.per-table th{padding:12px 16px;text-align:left;font-size:9px;font-weight:700;'
         'letter-spacing:1.5px;text-transform:uppercase;color:#94A3B8;'
         'border-bottom:1px solid #E2E8F0;background:#FAFBFC;}'
-        '.per-cell{padding:14px 16px;border-bottom:1px solid #F1F5F9;font-size:12px;}'
+        '.per-cell{padding:14px 16px;border-bottom:1px solid #F1F5F9;font-size:12px;vertical-align:top;}'
         '.per-mono{font-family:\'JetBrains Mono\',monospace;font-size:11px;color:#334155;}'
         '</style>'
         '<div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:8px;'
         'overflow:hidden;overflow-x:auto;margin-top:12px;">'
         '<table class="per-table"><thead><tr>'
         '<th>Rango</th><th style="text-align:center;">Días</th>'
-        '<th>Empleado</th><th>Tipo</th><th>Motivo</th><th>Aprobó</th>'
+        '<th>Empleado</th><th>Tipo</th><th>Modalidad / Horario</th><th>Motivo</th>'
         '</tr></thead><tbody>' + "".join(rows_html) + '</tbody></table></div>'
     )
     st.markdown(table_html, unsafe_allow_html=True)
 
-    # Eliminación
-    with st.expander("🗑️  Eliminar registro"):
-        delete_options = {}
-        for _, row in filtered.iterrows():
-            fi = row["fi_parsed"].strftime("%d/%m/%Y") if row["fi_parsed"] else ""
-            emp = row.get("empleado_nombre", "")
-            tipo = PERMIT_LABELS.get(row.get("tipo", ""), "")
-            key = f"{fi} · {emp} · {tipo}"
-            delete_options[key] = row
+    # ============================================================
+    # ELIMINACIÓN (siempre visible, no oculta en expander)
+    # ============================================================
+    st.markdown(
+        '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+        'text-transform:uppercase;color:#DC2626;margin:24px 0 12px 0;">'
+        '🗑️ — ELIMINAR REGISTRO'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-        if delete_options:
-            selected_key = st.selectbox(
-                "Registro a eliminar", options=list(delete_options.keys()), key="per_del",
-            )
-            if st.button("Eliminar", type="primary", key="per_del_btn"):
-                try:
-                    selected = delete_options[selected_key]
-                    sheet_row_idx = _find_permit_row_idx(selected)
-                    if sheet_row_idx:
-                        delete_row(WS_PERMITS, sheet_row_idx)
-                        notify_success("Permiso eliminado.")
-                        st.rerun()
-                    else:
-                        notify_error("No se encontró el registro.")
-                except Exception as e:
-                    notify_error(str(e))
+    delete_options = {"— Selecciona un registro —": None}
+    for _, row in filtered.iterrows():
+        fi = row["fi_parsed"].strftime("%d/%m/%Y") if row["fi_parsed"] else ""
+        emp = row.get("empleado_nombre", "")
+        tipo = PERMIT_LABELS.get(row.get("tipo", ""), "")
+        modalidad = str(row.get("modalidad", "") or "").strip() or "SIN MODALIDAD"
+        hi = str(row.get("hora_inicio", "") or "")
+        hf = str(row.get("hora_fin", "") or "")
+        horario_str = f"({hi}–{hf})" if hi or hf else ""
+        key = f"{fi} · {emp} · {tipo} · {modalidad} {horario_str}".strip()
+        delete_options[key] = row
+
+    col_sel, col_btn = st.columns([4, 1])
+    with col_sel:
+        selected_key = st.selectbox(
+            "Registro a eliminar",
+            options=list(delete_options.keys()),
+            key="per_del",
+            label_visibility="collapsed",
+        )
+    with col_btn:
+        if st.button(
+            "🗑️ Eliminar",
+            type="primary",
+            key="per_del_btn",
+            use_container_width=True,
+            disabled=(delete_options[selected_key] is None),
+        ):
+            try:
+                selected = delete_options[selected_key]
+                sheet_row_idx = _find_permit_row_idx(selected)
+                if sheet_row_idx:
+                    delete_row(WS_PERMITS, sheet_row_idx)
+                    from core.sheets import invalidate_cache
+                    invalidate_cache()
+                    notify_success("Permiso eliminado.")
+                    st.rerun()
+                else:
+                    notify_error("No se encontró el registro en el sheet.")
+            except Exception as e:
+                notify_error(str(e))
 
 
 def _find_permit_row_idx(target_row):
