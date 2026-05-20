@@ -49,14 +49,57 @@ def read_worksheet(name: str) -> pd.DataFrame:
     """
     Lee una worksheet completa como DataFrame.
     Cacheada con TTL para no saturar la API de Google.
+
+    TOLERANTE A HEADERS DEFECTUOSOS:
+    - Si la fila 1 tiene celdas vacías o duplicadas, las limpia/renombra en memoria
+    - NO modifica el Sheet, solo trabaja sobre el DataFrame en RAM
     """
     ws = get_worksheet(name)
-    records = ws.get_all_records()
-    if not records:
-        # Si no hay datos, devolver DF vacío con los headers
-        headers = ws.row_values(1)
-        return pd.DataFrame(columns=headers)
-    return pd.DataFrame(records)
+    # Lectura robusta: NO usar get_all_records() (rompe con duplicados/vacíos)
+    # Usar get_all_values() y construir el DataFrame manualmente
+    all_values = ws.get_all_values()
+    if not all_values:
+        return pd.DataFrame()
+
+    raw_headers = all_values[0]
+    data_rows = all_values[1:]
+
+    # Limpiar headers: rellenar vacíos con placeholder, renombrar duplicados
+    seen = {}
+    clean_headers = []
+    for i, h in enumerate(raw_headers):
+        h_str = (h or "").strip()
+        if not h_str:
+            h_str = f"_col_{i}"
+        if h_str in seen:
+            seen[h_str] += 1
+            h_str = f"{h_str}_{seen[h_str]}"
+        else:
+            seen[h_str] = 0
+        clean_headers.append(h_str)
+
+    if not data_rows:
+        return pd.DataFrame(columns=clean_headers)
+
+    # Normalizar filas al ancho del header
+    n_cols = len(clean_headers)
+    normalized = []
+    for row in data_rows:
+        if len(row) < n_cols:
+            row = row + [""] * (n_cols - len(row))
+        elif len(row) > n_cols:
+            row = row[:n_cols]
+        normalized.append(row)
+
+    df = pd.DataFrame(normalized, columns=clean_headers)
+
+    # Quitar columnas placeholder (_col_N) si están totalmente vacías
+    cols_to_drop = [c for c in df.columns
+                    if c.startswith("_col_") and (df[c] == "").all()]
+    if cols_to_drop:
+        df = df.drop(columns=cols_to_drop)
+
+    return df
 
 
 def invalidate_cache():
@@ -139,6 +182,7 @@ WORKSHEET_HEADERS = {
     "Permisos": [
         "empleado_id", "empleado_nombre", "fecha_inicio", "fecha_fin",
         "tipo", "motivo", "aprobado_por", "timestamp",
+        "modalidad", "hora_inicio", "hora_fin", "estado", "id_permiso",
     ],
     "Feriados": [
         "fecha", "nombre_feriado", "empleado_id_cubre", "empleado_nombre_cubre",
@@ -199,3 +243,69 @@ def ensure_headers() -> dict:
 
     invalidate_cache()
     return status
+
+
+# ============================================================
+# DIAGNÓSTICO DE HEADERS DEFECTUOSOS
+# ============================================================
+def diagnose_all_headers() -> list[dict]:
+    """
+    Revisa todas las worksheets esperadas y reporta:
+    - Headers vacíos en la fila 1
+    - Headers duplicados
+    - Headers que NO coinciden con WORKSHEET_HEADERS
+
+    Returns lista de dicts: {worksheet, status, issues, headers_actual, headers_esperados}
+    """
+    results = []
+    for ws_name in ALL_WORKSHEETS:
+        try:
+            ws = get_worksheet(ws_name)
+            raw = ws.row_values(1)
+        except Exception as e:
+            results.append({
+                "worksheet": ws_name,
+                "status": "ERROR",
+                "issues": [f"No se pudo leer: {e}"],
+                "headers_actual": [],
+                "headers_esperados": WORKSHEET_HEADERS.get(ws_name, []),
+            })
+            continue
+
+        issues = []
+        # 1. Headers vacíos
+        empty_count = sum(1 for h in raw if not (h or "").strip())
+        if empty_count > 0:
+            issues.append(f"{empty_count} celda(s) vacía(s) en la fila 1")
+
+        # 2. Headers duplicados
+        non_empty = [(h or "").strip() for h in raw if (h or "").strip()]
+        seen = set()
+        dupes = set()
+        for h in non_empty:
+            if h in seen:
+                dupes.add(h)
+            seen.add(h)
+        if dupes:
+            issues.append(f"Headers duplicados: {sorted(dupes)}")
+
+        # 3. Faltan headers esperados
+        expected = WORKSHEET_HEADERS.get(ws_name, [])
+        if expected:
+            missing = [h for h in expected if h not in non_empty]
+            if missing:
+                issues.append(f"Faltan: {missing}")
+
+            extra = [h for h in non_empty if h not in expected]
+            if extra:
+                issues.append(f"Sobran (inesperados): {extra}")
+
+        results.append({
+            "worksheet": ws_name,
+            "status": "OK" if not issues else "WARN",
+            "issues": issues,
+            "headers_actual": raw,
+            "headers_esperados": expected,
+        })
+
+    return results
