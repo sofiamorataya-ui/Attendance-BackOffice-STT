@@ -124,11 +124,27 @@ def _count_in_year(df: pd.DataFrame, year: int) -> int:
 
 
 def _render_new_form(employees_active: pd.DataFrame):
+    import uuid as _uuid
+    from core.time_utils import parse_time as _parse_time
+
     emp_options = {}
     for _, emp in employees_active.iterrows():
         flag = flag_emoji_unicode(emp.get("pais", ""))
         display = f"{flag}  {emp['nombre']} ({emp.get('rol', '')})"
         emp_options[display] = {"id": int(emp["id"]), "nombre": emp["nombre"]}
+
+    # Selector de modalidad (FUERA del form para que el form reaccione al cambio)
+    modalidad = st.radio(
+        "Modalidad del permiso",
+        options=["DIA_COMPLETO", "PARCIAL_CON_FIN", "PARCIAL_ABIERTO"],
+        format_func=lambda x: {
+            "DIA_COMPLETO": "📅  Día completo (uno o más días)",
+            "PARCIAL_CON_FIN": "⏱️  Parcial con hora fin (sale temprano / llega tarde)",
+            "PARCIAL_ABIERTO": "🚪  Parcial abierto (sin hora fin conocida — se cierra después)",
+        }[x],
+        key="per_modalidad",
+        horizontal=False,
+    )
 
     with st.form("new_permit_form", clear_on_submit=True):
         col1, col2 = st.columns([2, 1])
@@ -144,25 +160,61 @@ def _render_new_form(employees_active: pd.DataFrame):
                 key="per_tipo",
             )
 
-        col3, col4 = st.columns(2)
-        with col3:
+        if modalidad == "DIA_COMPLETO":
+            col3, col4 = st.columns(2)
+            with col3:
+                fecha_inicio = st.date_input(
+                    "Fecha inicio", value=today_gt(),
+                    format="DD/MM/YYYY", key="per_from",
+                )
+            with col4:
+                fecha_fin = st.date_input(
+                    "Fecha fin", value=today_gt(),
+                    format="DD/MM/YYYY", key="per_to",
+                )
+            hora_inicio_str = ""
+            hora_fin_str = ""
+
+        elif modalidad == "PARCIAL_CON_FIN":
             fecha_inicio = st.date_input(
-                "Fecha inicio",
-                value=today_gt(),
-                format="DD/MM/YYYY",
-                key="per_from",
+                "Fecha", value=today_gt(),
+                format="DD/MM/YYYY", key="per_fecha_pc",
             )
-        with col4:
-            fecha_fin = st.date_input(
-                "Fecha fin",
-                value=today_gt(),
-                format="DD/MM/YYYY",
-                key="per_to",
+            fecha_fin = fecha_inicio
+            col_hi, col_hf = st.columns(2)
+            with col_hi:
+                hora_inicio_str = st.text_input(
+                    "Hora inicio (HH:MM)",
+                    value=now_gt().strftime("%H:%M"),
+                    placeholder="06:00",
+                    key="per_hi", max_chars=8,
+                )
+            with col_hf:
+                hora_fin_str = st.text_input(
+                    "Hora fin (HH:MM)",
+                    value="",
+                    placeholder="15:00",
+                    key="per_hf", max_chars=8,
+                )
+
+        else:  # PARCIAL_ABIERTO
+            fecha_inicio = st.date_input(
+                "Fecha", value=today_gt(),
+                format="DD/MM/YYYY", key="per_fecha_pa",
             )
+            fecha_fin = fecha_inicio
+            hora_inicio_str = st.text_input(
+                "Hora inicio (HH:MM)",
+                value=now_gt().strftime("%H:%M"),
+                placeholder="06:00",
+                key="per_hi_open", max_chars=8,
+            )
+            hora_fin_str = ""
+            st.caption("⚠️  Sin hora fin: el permiso queda ACTIVO hasta que lo cierres manualmente.")
 
         motivo = st.text_area(
             "Motivo / descripción",
-            placeholder="Ej: Trámite migratorio, cirugía menor, fallecimiento familiar...",
+            placeholder="Ej: Cita IGSS, Trámite migratorio, Sale temprano por asunto familiar...",
             key="per_motivo",
             max_chars=400,
         )
@@ -172,31 +224,83 @@ def _render_new_form(employees_active: pd.DataFrame):
         )
 
         if submitted:
-            if fecha_fin < fecha_inicio:
+            # Validaciones
+            if modalidad == "DIA_COMPLETO" and fecha_fin < fecha_inicio:
                 notify_error("La fecha 'fin' no puede ser anterior a 'inicio'.")
-            elif not motivo.strip():
+                return
+            if not motivo.strip():
                 notify_error("El motivo es obligatorio.")
-            else:
-                try:
-                    selected = emp_options[emp_display]
-                    timestamp = now_gt().strftime("%Y-%m-%d %H:%M:%S")
-                    row = [
-                        selected["id"], selected["nombre"],
-                        fecha_inicio.strftime("%Y-%m-%d"),
-                        fecha_fin.strftime("%Y-%m-%d"),
-                        tipo, motivo,
-                        current_user_display_name(), timestamp,
-                    ]
-                    append_row(WS_PERMITS, row)
+                return
+
+            hi_parsed = _parse_time(hora_inicio_str) if hora_inicio_str else None
+            hf_parsed = _parse_time(hora_fin_str) if hora_fin_str else None
+
+            if modalidad == "PARCIAL_CON_FIN":
+                if not hi_parsed:
+                    notify_error(f"Hora inicio inválida: '{hora_inicio_str}'")
+                    return
+                if not hf_parsed:
+                    notify_error(f"Hora fin inválida: '{hora_fin_str}'")
+                    return
+                from core.time_utils import time_to_minutes
+                if time_to_minutes(hf_parsed) <= time_to_minutes(hi_parsed):
+                    notify_error("La hora fin debe ser posterior a la hora inicio.")
+                    return
+
+            if modalidad == "PARCIAL_ABIERTO" and not hi_parsed:
+                notify_error(f"Hora inicio inválida: '{hora_inicio_str}'")
+                return
+
+            try:
+                selected = emp_options[emp_display]
+                timestamp = now_gt().strftime("%Y-%m-%d %H:%M:%S")
+                id_permiso = f"PER-{now_gt().strftime('%Y%m%d%H%M%S')}-{_uuid.uuid4().hex[:6].upper()}"
+
+                # Estado: ACTIVO si parcial abierto, CERRADO en otros casos
+                if modalidad == "PARCIAL_ABIERTO":
+                    estado = "ACTIVO"
+                else:
+                    estado = "CERRADO"
+
+                row = [
+                    selected["id"], selected["nombre"],
+                    fecha_inicio.strftime("%Y-%m-%d"),
+                    fecha_fin.strftime("%Y-%m-%d"),
+                    tipo, motivo,
+                    current_user_display_name(), timestamp,
+                    modalidad,
+                    hi_parsed.strftime("%H:%M") if hi_parsed else "",
+                    hf_parsed.strftime("%H:%M") if hf_parsed else "",
+                    estado,
+                    id_permiso,
+                ]
+                append_row(WS_PERMITS, row)
+                from core.sheets import invalidate_cache
+                invalidate_cache()
+
+                if modalidad == "DIA_COMPLETO":
                     days = (fecha_fin - fecha_inicio).days + 1
-                    notify_success(
+                    msg = (
                         f"{selected['nombre']} · {PERMIT_LABELS.get(tipo)} · "
                         f"{fecha_inicio.strftime('%d/%m')} – {fecha_fin.strftime('%d/%m/%Y')} "
-                        f"({days} día{'s' if days != 1 else ''})",
-                        title="Permiso registrado"
+                        f"({days} día{'s' if days != 1 else ''})"
                     )
-                except Exception as e:
-                    notify_error(str(e))
+                elif modalidad == "PARCIAL_CON_FIN":
+                    msg = (
+                        f"{selected['nombre']} · {PERMIT_LABELS.get(tipo)} · "
+                        f"{fecha_inicio.strftime('%d/%m')} de "
+                        f"{hi_parsed.strftime('%H:%M')} a {hf_parsed.strftime('%H:%M')}"
+                    )
+                else:
+                    msg = (
+                        f"{selected['nombre']} · {PERMIT_LABELS.get(tipo)} · "
+                        f"ACTIVO desde {hi_parsed.strftime('%H:%M')}"
+                    )
+
+                notify_success(msg, title="Permiso registrado")
+                st.rerun()
+            except Exception as e:
+                notify_error(str(e))
 
 
 def _render_history(employees_active: pd.DataFrame, df: pd.DataFrame):
@@ -344,3 +448,119 @@ def _find_permit_row_idx(target_row):
                 and row[idx_ts] == target_ts):
                 return i
     return None
+
+
+# ============================================================
+# API PÚBLICA: permisos parciales (consumida desde dashboard)
+# ============================================================
+def load_partial_permits_for_date(target_date):
+    """
+    Devuelve un DataFrame con TODOS los permisos parciales (PARCIAL_CON_FIN y
+    PARCIAL_ABIERTO) que aplican a la fecha indicada.
+    Para PARCIAL_CON_FIN: aplica si target_date == fecha_inicio
+    Para PARCIAL_ABIERTO: aplica si estado == ACTIVO y fecha_inicio <= target_date
+    """
+    df = _load_permits()
+    if df.empty:
+        return df
+
+    # Solo modalidades parciales
+    if "modalidad" not in df.columns:
+        return df.iloc[0:0]
+
+    parciales = df[df["modalidad"].isin(["PARCIAL_CON_FIN", "PARCIAL_ABIERTO"])].copy()
+    if parciales.empty:
+        return parciales
+
+    # Filtrar por fecha
+    def _aplica(row):
+        modalidad = str(row.get("modalidad", "")).upper()
+        if modalidad == "PARCIAL_CON_FIN":
+            return row["fi_parsed"] == target_date
+        if modalidad == "PARCIAL_ABIERTO":
+            estado = str(row.get("estado", "")).upper()
+            return estado == "ACTIVO" and row["fi_parsed"] <= target_date
+        return False
+
+    mask = parciales.apply(_aplica, axis=1)
+    return parciales[mask].reset_index(drop=True)
+
+
+def get_active_partial_permit_for_employee(employee_id, target_date=None):
+    """Devuelve el permiso PARCIAL_ABIERTO activo del empleado (o None)."""
+    target_date = target_date or today_gt()
+    df = _load_permits()
+    if df.empty or "modalidad" not in df.columns:
+        return None
+    match = df[
+        (df["empleado_id"].astype(str) == str(employee_id))
+        & (df["modalidad"] == "PARCIAL_ABIERTO")
+        & (df["estado"].astype(str).str.upper() == "ACTIVO")
+        & (df["fi_parsed"] <= target_date)
+    ]
+    if match.empty:
+        return None
+    match = match.sort_values("timestamp", ascending=False)
+    return match.iloc[0]
+
+
+def close_partial_permit(id_permiso: str, hora_fin, closed_by: str):
+    """Cierra un permiso PARCIAL_ABIERTO indicando la hora fin."""
+    from datetime import time as _t
+    ws = get_worksheet(WS_PERMITS)
+    all_rows = ws.get_all_values()
+    if len(all_rows) < 2:
+        return {"success": False, "message": "No hay permisos en el sheet."}
+
+    headers = all_rows[0]
+    try:
+        idx_id = headers.index("id_permiso")
+        idx_hf = headers.index("hora_fin")
+        idx_estado = headers.index("estado")
+    except ValueError as e:
+        return {"success": False, "message": f"Headers inválidos: {e}"}
+
+    target_row_idx = None
+    for i, row in enumerate(all_rows[1:], start=2):
+        if len(row) > idx_id and row[idx_id] == id_permiso:
+            target_row_idx = i
+            break
+
+    if target_row_idx is None:
+        return {"success": False, "message": "Permiso no encontrado."}
+
+    if not isinstance(hora_fin, _t):
+        return {"success": False, "message": "Hora fin inválida."}
+
+    ws.update_cell(target_row_idx, idx_hf + 1, hora_fin.strftime("%H:%M"))
+    ws.update_cell(target_row_idx, idx_estado + 1, "CERRADO")
+    from core.sheets import invalidate_cache
+    invalidate_cache()
+
+    return {"success": True, "message": f"Permiso cerrado a las {hora_fin.strftime('%H:%M')}."}
+
+
+def register_partial_permit_now(employee_id, employee_name, tipo, motivo, registered_by):
+    """Registra un permiso PARCIAL_ABIERTO con hora_inicio = ahora."""
+    import uuid as _uuid
+    from core.sheets import invalidate_cache
+
+    now = now_gt()
+    hi_str = now.strftime("%H:%M")
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    fecha_str = now.strftime("%Y-%m-%d")
+    id_permiso = f"PER-{now.strftime('%Y%m%d%H%M%S')}-{_uuid.uuid4().hex[:6].upper()}"
+
+    row = [
+        employee_id, employee_name, fecha_str, fecha_str,
+        tipo, motivo, registered_by, timestamp,
+        "PARCIAL_ABIERTO", hi_str, "", "ACTIVO", id_permiso,
+    ]
+    append_row(WS_PERMITS, row)
+    invalidate_cache()
+
+    return {
+        "success": True,
+        "message": f"Permiso ACTIVO iniciado para {employee_name} a las {hi_str}.",
+        "id_permiso": id_permiso,
+    }
