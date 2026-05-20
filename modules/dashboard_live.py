@@ -1074,6 +1074,8 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
                              hours_value: float, sorted_statuses: list):
     """
     Renderiza un país: header + timeline header + por cada empleado [fila + expander].
+    TODOS los iframes van dentro de las mismas columnas [20, 1, 1] para que el ancho
+    del track interno sea idéntico y las marcas de hora coincidan visualmente.
     """
     # ---- Header del país (iframe) ----
     flag_img = flag_img_inline(country_code, size=18)
@@ -1095,7 +1097,11 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
         '</div></div>'
         '</div></div></body></html>'
     )
-    components.html(country_header_html, height=72, scrolling=False)
+    # Envolver en columnas [20, 1, 1] para que el ancho del iframe sea idéntico
+    # al de las filas de empleados (que también usan ese layout).
+    col_hdr, _spacer1, _spacer2 = st.columns([20, 1, 1])
+    with col_hdr:
+        components.html(country_header_html, height=72, scrolling=False)
 
     # ---- Timeline header (las horas) ----
     timeline_hdr_html = (
@@ -1108,7 +1114,9 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
         + render_timeline_header(TIMELINE_START_HOUR, TIMELINE_END_HOUR) +
         '</div></div></body></html>'
     )
-    components.html(timeline_hdr_html, height=44, scrolling=False)
+    col_th, _s1, _s2 = st.columns([20, 1, 1])
+    with col_th:
+        components.html(timeline_hdr_html, height=44, scrolling=False)
 
     # ---- Por cada empleado: fila visual + expander nativo ----
     for s in sorted_statuses:
