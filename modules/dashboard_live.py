@@ -831,27 +831,64 @@ def render():
         return
 
     # ============================================================
-    # MODO HISTÓRICO: resumen de incidencias del período
+    # MODO HISTÓRICO
     # ============================================================
+    # Si es DÍA único histórico → renderizar timeline visual COMPLETO (como live)
+    # Si es semana/mes/año → renderizar resumen agregado de incidencias
+    if period_kind == "day":
+        st.markdown(
+            f'<div style="background:#FEF3C7;border-left:3px solid #D97706;'
+            f'padding:12px 18px;border-radius:0 4px 4px 0;margin-bottom:16px;'
+            f'font-size:12px;color:#92400E;">'
+            f'📊 <strong>Modo histórico</strong> · Visualizando {period_label.lower()}. '
+            f'Selecciona "Día" + fecha de hoy para volver al modo en vivo.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        try:
+            statuses = get_all_statuses(date_from)
+        except Exception as e:
+            st.error(f"⚠️ Error al cargar datos del Sheet: {e}")
+            return
+        if not statuses:
+            st.warning("No hay empleados activos.")
+            return
+
+        # Renderizar el timeline visual EN MODO READ-ONLY (sin botones de acción)
+        _render_live_timeline(statuses, target_date=date_from, read_only=True)
+
+        # Debajo del timeline: resumen de incidencias de ese día
+        st.divider()
+        st.markdown(
+            '<div style="font-size:11px;font-weight:700;letter-spacing:1.5px;'
+            'text-transform:uppercase;color:#DC2626;margin:16px 0 12px 0;">'
+            '— INCIDENCIAS REGISTRADAS EN ESTE DÍA</div>',
+            unsafe_allow_html=True,
+        )
+        _render_historical_summary(date_from, date_to, period_label, period_kind, suppress_header=True)
+        return
+
+    # Semana/mes/año → resumen agregado clásico
     _render_historical_summary(date_from, date_to, period_label, period_kind)
 
 
-def _render_historical_summary(date_from, date_to, period_label, period_kind):
+def _render_historical_summary(date_from, date_to, period_label, period_kind, suppress_header=False):
     """Vista histórica: resumen de incidencias en el período seleccionado."""
     from core.incidents import load_incidents_df, compute_row_duration, format_duration
     from core.config import INCIDENT_LABELS, INCIDENT_ICONS, INCIDENT_COLORS
     from core.sheets import read_worksheet
     from core.config import WS_EMPLOYEES
 
-    st.markdown(
-        f'<div style="background:#FEF3C7;border-left:3px solid #D97706;'
-        f'padding:12px 18px;border-radius:0 4px 4px 0;margin-bottom:16px;'
-        f'font-size:12px;color:#92400E;">'
-        f'📊 <strong>Modo histórico</strong> · Visualizando {period_label.lower()}. '
-        f'Selecciona "Día" + fecha de hoy para volver al modo en vivo.'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+    if not suppress_header:
+        st.markdown(
+            f'<div style="background:#FEF3C7;border-left:3px solid #D97706;'
+            f'padding:12px 18px;border-radius:0 4px 4px 0;margin-bottom:16px;'
+            f'font-size:12px;color:#92400E;">'
+            f'📊 <strong>Modo histórico</strong> · Visualizando {period_label.lower()}. '
+            f'Selecciona "Día" + fecha de hoy para volver al modo en vivo.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     # Cargar empleados
     try:
@@ -979,11 +1016,15 @@ def _render_historical_summary(date_from, date_to, period_label, period_kind):
 # DASHBOARD EN VIVO - LAYOUT REFACTORIZADO
 # Filas Streamlit nativas para que el expander quede DEBAJO de cada empleado
 # ============================================================
-def _render_live_timeline(statuses):
+def _render_live_timeline(statuses, target_date=None, read_only=False):
     """
     Layout:
     - KPIs (1 iframe HTML)
     - Por cada país: header + timeline header + filas (cada empleado = 1 iframe + 1 expander Streamlit)
+
+    Args:
+        target_date: si None, es modo VIVO; si fecha pasada, es modo HISTÓRICO
+        read_only: si True, no muestra botones de acción (incidencia/permiso)
     """
     from core.incidents import calculate_duration_minutes
     from datetime import time as _t
@@ -1051,27 +1092,38 @@ def _render_live_timeline(statuses):
     # SECCIÓN 3: Renderizar cada país
     # ============================================================
     if gt_sorted:
-        _render_country_section("GT", "Guatemala", "GT · 01", gt_hours, gt_sorted)
+        _render_country_section("GT", "Guatemala", "GT · 01", gt_hours, gt_sorted, read_only=read_only)
 
     if ve_sorted:
-        _render_country_section("VE", "Venezuela", "VE · 02", ve_hours, ve_sorted)
+        _render_country_section("VE", "Venezuela", "VE · 02", ve_hours, ve_sorted, read_only=read_only)
 
-    # Nota: el auto-refresh ya está activado en render() para el modo VIVO
-
-    last_update_html = (
-        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-        + DASHBOARD_CSS +
-        '</head><body style="margin:0;padding:0;background:transparent;">'
-        '<div class="stt-wrap"><div class="stt-last-update">'
-        f'<span class="stt-live-dot"></span> EN VIVO · Última actualización: '
-        f'{current_time_gt().strftime("%H:%M:%S")}'
-        '</div></div></body></html>'
-    )
+    # Banner inferior: distinto en vivo vs histórico
+    if read_only and target_date is not None:
+        last_update_html = (
+            '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+            + DASHBOARD_CSS +
+            '</head><body style="margin:0;padding:0;background:transparent;">'
+            '<div class="stt-wrap"><div class="stt-last-update" style="color:#92400E;">'
+            f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+            f'background:#D97706;margin-right:6px;"></span>'
+            f'MODO HISTÓRICO · Visualizando {target_date.strftime("%d/%m/%Y")}'
+            '</div></div></body></html>'
+        )
+    else:
+        last_update_html = (
+            '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+            + DASHBOARD_CSS +
+            '</head><body style="margin:0;padding:0;background:transparent;">'
+            '<div class="stt-wrap"><div class="stt-last-update">'
+            f'<span class="stt-live-dot"></span> EN VIVO · Última actualización: '
+            f'{current_time_gt().strftime("%H:%M:%S")}'
+            '</div></div></body></html>'
+        )
     components.html(last_update_html, height=60, scrolling=False)
 
 
 def _render_country_section(country_code: str, country_name: str, tag: str,
-                             hours_value: float, sorted_statuses: list):
+                             hours_value: float, sorted_statuses: list, read_only: bool = False):
     """
     Renderiza un país: header + timeline header + por cada empleado [fila + expander].
     TODOS los iframes van dentro de las mismas columnas [20, 1, 1] para que el ancho
@@ -1120,11 +1172,11 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
 
     # ---- Por cada empleado: fila visual + expander nativo ----
     for s in sorted_statuses:
-        _render_employee_row_with_form(s)
+        _render_employee_row_with_form(s, read_only=read_only)
 
 
 
-def _render_employee_row_with_form(status_data: dict):
+def _render_employee_row_with_form(status_data: dict, read_only: bool = False):
     """
     Fila completa de empleado:
     - Columna izquierda (95% ancho): iframe con la fila visual (nombre, avatar, segmentos, AHORA)
@@ -1180,7 +1232,19 @@ def _render_employee_row_with_form(status_data: dict):
         '</div></div></body></html>'
     )
 
-    # Columnas: 1 grande para el iframe + 2 pequeñas para los botones (🚨 incidencia, 🚦 permiso)
+    # ============================================================
+    # MODO READ-ONLY (histórico): solo el iframe a ancho completo, sin botones
+    # ============================================================
+    if read_only:
+        # Mantener mismas columnas [20,1,1] para que el ancho coincida con el header
+        col_row, _s1, _s2 = st.columns([20, 1, 1])
+        with col_row:
+            components.html(full_row_html, height=75, scrolling=False)
+        return
+
+    # ============================================================
+    # MODO LIVE: iframe + 2 botones (🚨 incidencia, 🚦 permiso)
+    # ============================================================
     col_row, col_btn_inc, col_btn_per = st.columns([20, 1, 1])
 
     with col_row:
@@ -1303,16 +1367,12 @@ def _show_terminate_dialog_impl(emp_id: int, emp_name: str, status_data: dict, a
 
     st.caption("— O terminar con hora fin manual —")
 
-    hf_str = st.text_input(
-        "Hora fin (HH:MM)",
-        value=now_hhmm,
-        max_chars=8,
-        placeholder="08:00",
+    hf_parsed = st.time_input(
+        "Hora fin",
+        value=current_time_gt().replace(second=0, microsecond=0),
+        step=300,
         key=f"term_hf_{emp_id}",
     )
-    hf_parsed = _parse_time(hf_str)
-    if hf_str and not hf_parsed:
-        st.error(f"❌ Hora inválida: '{hf_str}'")
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -1323,7 +1383,7 @@ def _show_terminate_dialog_impl(emp_id: int, emp_name: str, status_data: dict, a
             "✓ Terminar con esta hora",
             use_container_width=True,
             type="primary",
-            disabled=not hf_parsed,
+            disabled=(hf_parsed is None),
             key=f"term_submit_{emp_id}",
         ):
             try:
@@ -1383,35 +1443,25 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
 
     now_hhmm = current_time_gt().strftime("%H:%M")
 
-    # CAMPOS DE TEXTO EDITABLES PARA LAS HORAS
+    # CAMPOS DE HORA NATIVOS (st.time_input con formato 12h AM/PM)
     col_hi, col_hf = st.columns(2)
+    now_time_obj = current_time_gt().replace(second=0, microsecond=0)
     with col_hi:
-        hi_str = st.text_input(
-            "Hora inicio (HH:MM)",
-            value=now_hhmm,
-            max_chars=8,
-            placeholder="07:15",
+        hi_parsed = st.time_input(
+            "Hora inicio",
+            value=now_time_obj,
+            step=300,  # incrementos de 5 min con flechas
             key=f"dlg_hi_{emp_id}",
-            help="Escribe la hora en formato 24h. Ej: 07:15, 13:45",
+            help="Selector de hora con AM/PM. Step: 5 min.",
         )
     with col_hf:
-        hf_str = st.text_input(
-            "Hora fin (HH:MM)",
-            value=now_hhmm,
-            max_chars=8,
-            placeholder="08:00",
+        hf_parsed = st.time_input(
+            "Hora fin",
+            value=now_time_obj,
+            step=300,
             key=f"dlg_hf_{emp_id}",
-            help="Escribe la hora en formato 24h. Ej: 08:00, 14:30",
+            help="Selector de hora con AM/PM. Step: 5 min.",
         )
-
-    # Validar formato en vivo
-    hi_parsed = _parse_time(hi_str)
-    hf_parsed = _parse_time(hf_str)
-
-    if hi_str and not hi_parsed:
-        st.error(f"❌ Hora inicio inválida: '{hi_str}'. Usa formato HH:MM (ej. 07:15)")
-    if hf_str and not hf_parsed:
-        st.error(f"❌ Hora fin inválida: '{hf_str}'. Usa formato HH:MM (ej. 08:00)")
 
     nota = st.text_input(
         "Nota (opcional)",
@@ -1573,30 +1623,33 @@ def _show_permit_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
 
     elif modalidad == "PARCIAL_CON_FIN":
         col_hi, col_hf = st.columns(2)
-        now_hhmm = current_time_gt().strftime("%H:%M")
+        now_time_obj = current_time_gt().replace(second=0, microsecond=0)
+        # Hora fin sugerida: +1 hora
+        next_hour = current_time_gt().replace(second=0, microsecond=0)
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            base = _dt.combine(today_gt(), next_hour)
+            next_time_obj = (base + _td(hours=1)).time()
+        except Exception:
+            next_time_obj = next_hour
+
         with col_hi:
-            hi_str = st.text_input(
-                "Hora inicio (HH:MM)",
-                value=now_hhmm,
-                max_chars=8,
-                placeholder="06:00",
+            hi_parsed = st.time_input(
+                "Hora inicio",
+                value=now_time_obj,
+                step=300,
                 key=f"perm_hi_{emp_id}",
+                help="Selector de hora con AM/PM. Step: 5 min.",
             )
-            hi_parsed = _parse_time(hi_str)
-            if hi_str and not hi_parsed:
-                st.error(f"❌ Hora inválida: '{hi_str}'")
         with col_hf:
-            hf_str = st.text_input(
-                "Hora fin (HH:MM)",
-                value=(current_time_gt().replace(hour=min(current_time_gt().hour + 1, 23))).strftime("%H:%M"),
-                max_chars=8,
-                placeholder="08:00",
+            hf_parsed = st.time_input(
+                "Hora fin",
+                value=next_time_obj,
+                step=300,
                 key=f"perm_hf_{emp_id}",
+                help="Selector de hora con AM/PM. Step: 5 min.",
             )
-            hf_parsed = _parse_time(hf_str)
-            if hf_str and not hf_parsed:
-                st.error(f"❌ Hora inválida: '{hf_str}'")
-        # Validar
+        # Validar que fin > inicio
         if hi_parsed and hf_parsed:
             from core.time_utils import time_to_minutes
             if time_to_minutes(hf_parsed) <= time_to_minutes(hi_parsed):
@@ -1739,16 +1792,12 @@ def _show_close_permit_dialog_impl(emp_id: int, emp_name: str, active_perm):
 
     st.caption("— O cerrar con hora fin manual —")
 
-    hf_str = st.text_input(
-        "Hora fin (HH:MM)",
-        value=now_hhmm,
-        max_chars=8,
-        placeholder="14:00",
+    hf_parsed = st.time_input(
+        "Hora fin",
+        value=current_time_gt().replace(second=0, microsecond=0),
+        step=300,
         key=f"closeperm_hf_{emp_id}",
     )
-    hf_parsed = _parse_time(hf_str)
-    if hf_str and not hf_parsed:
-        st.error(f"❌ Hora inválida: '{hf_str}'")
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -1759,7 +1808,7 @@ def _show_close_permit_dialog_impl(emp_id: int, emp_name: str, active_perm):
             "✓ Cerrar con esta hora",
             use_container_width=True,
             type="primary",
-            disabled=not hf_parsed,
+            disabled=(hf_parsed is None),
             key=f"closeperm_submit_{emp_id}",
         ):
             try:
