@@ -220,7 +220,8 @@ def ensure_headers() -> dict:
     Verifica que todas las worksheets tengan los headers correctos.
     - Si una worksheet no existe, la crea
     - Si está vacía, escribe los headers
-    - Si le FALTAN columnas al final, las agrega automáticamente (sin tocar las existentes)
+    - Si tiene columnas SIN NOMBRE (fila 1 vacía) con datos abajo, las nombra
+    - Si le FALTAN columnas al final, las agrega automáticamente
     - Si tiene columnas en orden diferente, lo reporta pero NO modifica
     Devuelve dict con el estado de cada worksheet.
     """
@@ -228,36 +229,70 @@ def ensure_headers() -> dict:
     ss = get_spreadsheet()
     existing_titles = [ws.title for ws in ss.worksheets()]
 
+    def _col_letter(n):
+        s = ""
+        n0 = n
+        while n0 >= 0:
+            s = chr(ord("A") + n0 % 26) + s
+            n0 = n0 // 26 - 1
+        return s
+
     for ws_name in ALL_WORKSHEETS:
         if ws_name not in existing_titles:
             ss.add_worksheet(title=ws_name, rows=1000, cols=30)
             status[ws_name] = "creada"
 
         ws = ss.worksheet(ws_name)
-        current_headers = ws.row_values(1)
+        # Usar get_all_values para detectar el ancho real (columnas con datos pero sin header)
+        all_values = ws.get_all_values()
+        current_headers = all_values[0] if all_values else []
         expected_headers = WORKSHEET_HEADERS[ws_name]
 
-        if not current_headers:
+        if not current_headers or all((h or "").strip() == "" for h in current_headers):
             ws.update("A1", [expected_headers])
-            status[ws_name] = status.get(ws_name, "headers_agregados")
+            status[ws_name] = "headers_agregados_completos"
             continue
 
-        # Detectar columnas faltantes al final
-        missing_at_end = [h for h in expected_headers if h not in current_headers]
-        if missing_at_end:
-            # Append columnas faltantes al final de la fila 1
-            new_headers = list(current_headers) + missing_at_end
-            # Convertir índice a letra de columna (A, B, ..., Z, AA, AB...)
-            def _col_letter(n):
-                s = ""
-                n0 = n
-                while n0 >= 0:
-                    s = chr(ord("A") + n0 % 26) + s
-                    n0 = n0 // 26 - 1
-                return s
+        # Detectar el ancho real (cualquier columna con datos abajo)
+        max_data_col = len(current_headers)
+        for row in all_values[1:]:
+            if len(row) > max_data_col:
+                max_data_col = len(row)
+
+        # Si hay columnas con datos pero sin header (caso Permisos)
+        # Extender current_headers con vacíos hasta max_data_col
+        padded_headers = list(current_headers) + [""] * (max_data_col - len(current_headers))
+
+        # Reparar headers: rellenar vacíos en su POSICIÓN con los expected_headers
+        # que falten
+        needs_fix = False
+        new_headers = list(padded_headers)
+
+        # Detectar nombres ya presentes (sin contar vacíos)
+        present = [h for h in padded_headers if (h or "").strip()]
+        missing_names = [h for h in expected_headers if h not in present]
+
+        # Llenar huecos vacíos con los nombres faltantes EN ORDEN
+        missing_iter = iter(missing_names)
+        for i, h in enumerate(new_headers):
+            if not (h or "").strip():
+                try:
+                    new_headers[i] = next(missing_iter)
+                    needs_fix = True
+                except StopIteration:
+                    break
+
+        # Si AÚN faltan nombres (caso: hay más expected_headers que slots),
+        # agregarlos al final
+        remaining = list(missing_iter)
+        if remaining:
+            new_headers = new_headers + remaining
+            needs_fix = True
+
+        if needs_fix:
             last_col = _col_letter(len(new_headers) - 1)
-            ws.update(f"A1:{last_col}1", [new_headers])
-            status[ws_name] = f"columnas_agregadas: {missing_at_end}"
+            ws.update(f"A1:{last_col}1", [new_headers], value_input_option="USER_ENTERED")
+            status[ws_name] = f"headers_reparados (antes: {padded_headers}, ahora: {new_headers})"
             continue
 
         if current_headers == expected_headers:
