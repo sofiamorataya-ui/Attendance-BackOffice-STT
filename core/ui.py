@@ -520,6 +520,7 @@ def inject_css():
         letter-spacing: 0.5px;
         white-space: nowrap;
         overflow: hidden;
+        z-index: 1;
     }
     .stt-segment-work { background: #16A34A; }
     .stt-segment-lunch { background: #DC2626; }
@@ -1044,11 +1045,20 @@ def render_employee_timeline_row(
                 f'<div class="stt-incident-overlay" '
                 f'title="{tooltip_text}" '
                 f'{data_attrs} '
-                f'style="left:{start_pct}%; width:{width}%; '
+                f'style="position:absolute; top:1px; height:26px; '
+                f'left:{start_pct}%; width:{width}%; '
                 f'background:repeating-linear-gradient(45deg, {color}, '
                 f'{color} 6px, {color}DD 6px, {color}DD 12px); '
-                f'border:{border_style};">'
-                f'<span class="stt-incident-label">'
+                f'border:{border_style}; '
+                f'border-radius:3px; z-index:50; '
+                f'display:flex; align-items:center; justify-content:center; '
+                f'box-shadow:0 1px 4px rgba(0,0,0,0.15); '
+                f'cursor:help;">'
+                f'<span class="stt-incident-label" '
+                f'style="font-family:\'Inter Tight\',sans-serif; font-size:9px; '
+                f'font-weight:700; color:#FFFFFF; text-transform:uppercase; '
+                f'letter-spacing:0.5px; white-space:nowrap; padding:0 4px; '
+                f'text-shadow:0 1px 2px rgba(0,0,0,0.4);">'
                 f'{icon} {label}'
                 f'</span>'
                 f'<div class="stt-incident-tooltip">'
@@ -1061,10 +1071,96 @@ def render_employee_timeline_row(
                 f'</div>'
                 f'</div>'
             )
-        except Exception:
+        except Exception as e:
+            import sys
+            print(f"ERROR rendering incident overlay: {e}", file=sys.stderr)
             continue
 
     incident_overlay = "".join(overlays_html_parts)
+
+    # ============================================================
+    # OVERLAYS DE PERMISOS PARCIALES (barras moradas con franjas)
+    # ============================================================
+    permit_overlays_parts = []
+    day_partial_permits = status_data.get("day_partial_permits") or []
+    for perm in day_partial_permits:
+        try:
+            hi = parse_time(perm.get("hora_inicio", ""))
+            hf = parse_time(perm.get("hora_fin", ""))
+            if not hi:
+                continue
+            if not hf:
+                hf = current_time_gt()
+            start_pct = time_to_position_pct(hi, day_start, day_end)
+            end_pct = time_to_position_pct(hf, day_start, day_end)
+            if end_pct < start_pct:
+                end_pct = start_pct + 0.5
+            start_pct = max(start_pct, 0)
+            end_pct = min(end_pct, 100)
+            width = max(end_pct - start_pct, 1.5)
+
+            modalidad = str(perm.get("modalidad", "")).upper()
+            estado = str(perm.get("estado", "")).upper()
+            is_open = (modalidad == "PARCIAL_ABIERTO" and estado == "ACTIVO")
+            color = perm.get("color", "#8B5CF6")
+            tipo = perm.get("tipo", "")
+            motivo = (perm.get("motivo", "") or "")[:80]
+            border_style = "2px solid " + color if is_open else "1.5px solid " + color
+
+            # Duración
+            from core.incidents import calculate_duration_minutes, format_duration
+            dur_min = calculate_duration_minutes(hi, hf) if (hi and hf) else 0
+            dur_str = format_duration(dur_min) if dur_min > 0 else "—"
+
+            hi_display = hi.strftime("%H:%M") if hi else "?"
+            hf_display = hf.strftime("%H:%M") if hf else "ahora"
+            estado_pretty = "ABIERTO · en curso" if is_open else "Con hora fin"
+            tooltip_text = (
+                f"🚦 PERMISO · {tipo}\n"
+                f"Inicio: {hi_display}\n"
+                f"Fin: {hf_display}\n"
+                f"Duración: {dur_str}\n"
+                f"Estado: {estado_pretty}\n"
+                f"Motivo: {motivo}"
+            ).replace('"', "&quot;")
+
+            permit_overlays_parts.append(
+                f'<div class="stt-incident-overlay" '
+                f'title="{tooltip_text}" '
+                f'style="position:absolute; top:1px; height:26px; '
+                f'left:{start_pct}%; width:{width}%; '
+                f'background:repeating-linear-gradient(135deg, {color}, '
+                f'{color} 7px, {color}CC 7px, {color}CC 14px); '
+                f'border:{border_style}; '
+                f'border-radius:3px; z-index:50; '
+                f'display:flex; align-items:center; justify-content:center; '
+                f'box-shadow:0 1px 4px rgba(0,0,0,0.15); '
+                f'cursor:help;">'
+                f'<span class="stt-incident-label" '
+                f'style="font-family:\'Inter Tight\',sans-serif; font-size:9px; '
+                f'font-weight:700; color:#FFFFFF; text-transform:uppercase; '
+                f'letter-spacing:0.5px; white-space:nowrap; padding:0 4px; '
+                f'text-shadow:0 1px 2px rgba(0,0,0,0.4);">'
+                f'🚦 PERMISO'
+                f'</span>'
+                f'<div class="stt-incident-tooltip">'
+                f'<div class="stt-tt-title">🚦 Permiso · {tipo}</div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Inicio:</span> <span class="stt-tt-v">{hi_display}</span></div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Fin:</span> <span class="stt-tt-v">{hf_display}</span></div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Duración:</span> <span class="stt-tt-v stt-tt-dur">{dur_str}</span></div>'
+                f'<div class="stt-tt-row"><span class="stt-tt-k">Estado:</span> <span class="stt-tt-v">{estado_pretty}</span></div>'
+                + (f'<div class="stt-tt-note">{motivo}</div>' if motivo else '') +
+                f'</div>'
+                f'</div>'
+            )
+        except Exception as e:
+            # NO silenciar: imprimir el error para debug
+            import sys
+            print(f"ERROR rendering permit overlay: {e}", file=sys.stderr)
+            continue
+
+    # Concatenar overlays de permisos con los de incidencias
+    incident_overlay = incident_overlay + "".join(permit_overlays_parts)
 
     # Badge al lado del nombre si hay AL MENOS UNA activa
     active_inc = status_data.get("active_incident")
