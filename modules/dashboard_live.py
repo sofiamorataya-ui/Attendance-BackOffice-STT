@@ -320,6 +320,7 @@ body {
     letter-spacing: 0.5px;
     white-space: nowrap;
     overflow: hidden;
+    z-index: 1;
 }
 .stt-segment-work { background: #16A34A; }
 .stt-segment-lunch { background: #DC2626; }
@@ -408,7 +409,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 5;
+    z-index: 20;
     box-shadow: 0 1px 4px rgba(0,0,0,0.15);
     overflow: visible;
     cursor: help;
