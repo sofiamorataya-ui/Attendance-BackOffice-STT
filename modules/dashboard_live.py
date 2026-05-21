@@ -781,6 +781,11 @@ def render():
     from core.filters import render_period_selector
     from core.config import INCIDENT_LABELS, INCIDENT_ICONS, INCIDENT_COLORS
     from core.incidents import load_incidents_df, compute_row_duration, format_duration
+    from core.sheets import invalidate_cache
+
+    # CRÍTICO: invalidar caché AL ENTRAR AL DASHBOARD para garantizar datos frescos
+    # Sin esto, Streamlit puede servir datos cacheados después de cambios en el Sheet.
+    invalidate_cache()
 
     # Header
     render_page_title(
@@ -1036,6 +1041,43 @@ def _render_live_timeline(statuses, target_date=None, read_only=False):
     """
     from core.incidents import calculate_duration_minutes
     from datetime import time as _t
+
+    # ============================================================
+    # PANEL DIAGNÓSTICO EN VIVO: lo que el motor está pasando al render
+    # ============================================================
+    with st.expander("🔬 DIAGNÓSTICO en vivo: ¿qué permisos están llegando al render?", expanded=False):
+        st.caption(
+            "Este panel muestra exactamente lo que el motor está pasando al renderizador "
+            "para cada empleado. Si aquí aparecen permisos pero la barra morada no se ve, "
+            "es un problema del navegador (cache) — presiona Ctrl+F5."
+        )
+        for s in statuses:
+            emp = s["employee"]
+            partial = s.get("day_partial_permits") or []
+            incidents = s.get("day_incidents") or []
+            status_global = s.get("status", "?")
+
+            if partial or incidents or status_global in ("PERMIT", "SICK", "VACATION"):
+                st.markdown(
+                    f'<div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;'
+                    f'padding:10px 14px;margin-bottom:6px;font-family:\'JetBrains Mono\',monospace;font-size:11px;">'
+                    f'<b style="font-size:13px;">{emp.get("nombre", "?")}</b> '
+                    f'<span style="color:#94A3B8;">(id={emp.get("id")}, status={status_global})</span><br>'
+                    f'<b>day_partial_permits:</b> {len(partial)} permiso(s)<br>'
+                    + "".join([
+                        f'<span style="color:#8B5CF6;">  → {p.get("tipo")} · {p.get("hora_inicio")}–{p.get("hora_fin")} '
+                        f'· modalidad={p.get("modalidad")} · estado={p.get("estado")}</span><br>'
+                        for p in partial
+                    ])
+                    + f'<b>day_incidents:</b> {len(incidents)} incidencia(s)<br>'
+                    + "".join([
+                        f'<span style="color:#F97316;">  → {i.get("tipo")} · {i.get("hora_inicio")}–{i.get("hora_fin")} '
+                        f'· estado={i.get("estado")}</span><br>'
+                        for i in incidents
+                    ])
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
 
     kpis = compute_daily_kpis(statuses)
     total = kpis["total"]
