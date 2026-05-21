@@ -809,6 +809,14 @@ def render():
     if is_live_mode:
         st_autorefresh(interval=REFRESH_LIVE_DASHBOARD * 1000, key="dashboard_autorefresh")
 
+    # Botón de refresh manual del caché (por si los datos del Sheet no se ven)
+    col_refresh1, col_refresh2 = st.columns([6, 1])
+    with col_refresh2:
+        if st.button("🔄 Refrescar", help="Limpia caché y recarga datos del Sheet", key="manual_refresh"):
+            from core.sheets import invalidate_cache
+            invalidate_cache()
+            st.rerun()
+
     st.divider()
 
     # ============================================================
@@ -1370,7 +1378,7 @@ def _show_terminate_dialog_impl(emp_id: int, emp_name: str, status_data: dict, a
     hf_parsed = st.time_input(
         "Hora fin",
         value=current_time_gt().replace(second=0, microsecond=0),
-        step=300,
+        step=60,
         key=f"term_hf_{emp_id}",
     )
 
@@ -1450,17 +1458,17 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
         hi_parsed = st.time_input(
             "Hora inicio",
             value=now_time_obj,
-            step=300,  # incrementos de 5 min con flechas
+            step=60,
             key=f"dlg_hi_{emp_id}",
-            help="Selector de hora con AM/PM. Step: 5 min.",
+            help="Editable: escribe HH:MM AM/PM directamente.",
         )
     with col_hf:
         hf_parsed = st.time_input(
             "Hora fin",
             value=now_time_obj,
-            step=300,
+            step=60,
             key=f"dlg_hf_{emp_id}",
-            help="Selector de hora con AM/PM. Step: 5 min.",
+            help="Editable: escribe HH:MM AM/PM directamente.",
         )
 
     nota = st.text_input(
@@ -1637,17 +1645,17 @@ def _show_permit_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
             hi_parsed = st.time_input(
                 "Hora inicio",
                 value=now_time_obj,
-                step=300,
+                step=60,
                 key=f"perm_hi_{emp_id}",
-                help="Selector de hora con AM/PM. Step: 5 min.",
+                help="Editable: escribe HH:MM AM/PM directamente.",
             )
         with col_hf:
             hf_parsed = st.time_input(
                 "Hora fin",
                 value=next_time_obj,
-                step=300,
+                step=60,
                 key=f"perm_hf_{emp_id}",
-                help="Selector de hora con AM/PM. Step: 5 min.",
+                help="Editable: escribe HH:MM AM/PM directamente.",
             )
         # Validar que fin > inicio
         if hi_parsed and hf_parsed:
@@ -1795,7 +1803,7 @@ def _show_close_permit_dialog_impl(emp_id: int, emp_name: str, active_perm):
     hf_parsed = st.time_input(
         "Hora fin",
         value=current_time_gt().replace(second=0, microsecond=0),
-        step=300,
+        step=60,
         key=f"closeperm_hf_{emp_id}",
     )
 
