@@ -40,6 +40,14 @@ def render():
         subtitle=format_date_long(today_gt()),
     )
 
+    # Botón de refresh manual del caché
+    col_r1, col_r2 = st.columns([6, 1])
+    with col_r2:
+        if st.button("🔄 Refrescar", help="Limpia caché y recarga datos del Sheet", key="permits_manual_refresh"):
+            from core.sheets import invalidate_cache
+            invalidate_cache()
+            st.rerun()
+
     try:
         employees_df = read_worksheet(WS_EMPLOYEES)
     except Exception as e:
@@ -182,10 +190,91 @@ def render():
                         "tipo", "motivo", "aprobado_por", "timestamp",
                         "modalidad", "hora_inicio", "hora_fin", "estado", "id_permiso",
                     ]
-                    if sheet_headers != expected:
+                    missing_cols = [h for h in expected if h not in sheet_headers]
+
+                    if missing_cols:
                         st.error(
-                            f"❌ Los headers NO coinciden con lo esperado. Esto puede causar que "
-                            f"Python lea las columnas en el orden incorrecto.\n\n"
+                            f"🔴 **CAUSA REAL DEL BUG ENCONTRADA**\n\n"
+                            f"Faltan {len(missing_cols)} columnas en tu Sheet `Permisos`:\n"
+                            f"**{missing_cols}**\n\n"
+                            f"Por eso los permisos parciales no se guardan correctamente: "
+                            f"el código intenta escribir esos campos pero esas columnas no existen, "
+                            f"así que se pierden. Resultado: todos los permisos se interpretan como "
+                            f"'sin modalidad' = día completo = barra azul gigante."
+                        )
+
+                        col_fix1, col_fix2 = st.columns(2)
+
+                        with col_fix1:
+                            if st.button(
+                                f"🔧 AGREGAR las {len(missing_cols)} columnas faltantes",
+                                use_container_width=True,
+                                type="primary",
+                                key="diag_add_cols",
+                            ):
+                                try:
+                                    new_headers = list(sheet_headers) + missing_cols
+                                    def _col_letter(n):
+                                        s = ""
+                                        n0 = n
+                                        while n0 >= 0:
+                                            s = chr(ord("A") + n0 % 26) + s
+                                            n0 = n0 // 26 - 1
+                                        return s
+                                    last_col = _col_letter(len(new_headers) - 1)
+                                    ws.update(f"A1:{last_col}1", [new_headers], value_input_option="USER_ENTERED")
+                                    from core.sheets import invalidate_cache
+                                    invalidate_cache()
+                                    notify_success(
+                                        f"Columnas agregadas: {missing_cols}. "
+                                        f"Ahora elimina los permisos viejos con el botón de la derecha "
+                                        f"y re-créalos desde 'Nuevo registro'."
+                                    )
+                                    st.rerun()
+                                except Exception as e:
+                                    notify_error(f"Error al agregar columnas: {e}")
+
+                        with col_fix2:
+                            if st.button(
+                                f"🗑️ ELIMINAR TODOS los permisos de hoy ({len(today_permits)})",
+                                use_container_width=True,
+                                type="secondary",
+                                key="diag_del_today",
+                            ):
+                                try:
+                                    deleted = 0
+                                    all_rows = ws.get_all_values()
+                                    headers_now = all_rows[0]
+                                    try:
+                                        idx_ts = headers_now.index("timestamp")
+                                    except ValueError:
+                                        notify_error("No se encontró columna timestamp.")
+                                        st.stop()
+
+                                    timestamps_to_delete = set(
+                                        str(r.get("timestamp", "")) for _, r in today_permits.iterrows()
+                                    )
+
+                                    # Recorrer al revés para que los índices no se desfasen
+                                    for i in range(len(all_rows) - 1, 0, -1):
+                                        srow = all_rows[i]
+                                        if len(srow) > idx_ts and srow[idx_ts] in timestamps_to_delete:
+                                            ws.delete_rows(i + 1)
+                                            deleted += 1
+
+                                    from core.sheets import invalidate_cache
+                                    invalidate_cache()
+                                    notify_success(
+                                        f"{deleted} permiso(s) eliminado(s). "
+                                        f"Ahora vuelve a registrarlos desde 'Nuevo registro' con la modalidad correcta."
+                                    )
+                                    st.rerun()
+                                except Exception as e:
+                                    notify_error(f"Error al eliminar: {e}")
+                    elif sheet_headers != expected:
+                        st.warning(
+                            f"⚠️ Las columnas existen pero están en orden diferente. "
+                            f"Esto puede causar lecturas incorrectas.\n\n"
                             f"**Esperado:** {expected}\n\n"
                             f"**Actual:** {sheet_headers}"
                         )
@@ -665,6 +754,10 @@ def load_partial_permits_for_date(target_date):
     Para PARCIAL_CON_FIN: aplica si target_date == fecha_inicio
     Para PARCIAL_ABIERTO: aplica si estado == ACTIVO y fecha_inicio <= target_date
     """
+    # Forzar refresh para evitar caché stale (después de fix de headers)
+    from core.sheets import invalidate_cache
+    invalidate_cache()
+
     df = _load_permits()
     if df.empty:
         return df
@@ -673,22 +766,28 @@ def load_partial_permits_for_date(target_date):
     if "modalidad" not in df.columns:
         return df.iloc[0:0]
 
-    parciales = df[df["modalidad"].isin(["PARCIAL_CON_FIN", "PARCIAL_ABIERTO"])].copy()
+    # Normalizar modalidad (strip + upper) para evitar problemas con whitespace o case
+    df["_modalidad_norm"] = df["modalidad"].fillna("").astype(str).str.strip().str.upper()
+    parciales = df[df["_modalidad_norm"].isin(["PARCIAL_CON_FIN", "PARCIAL_ABIERTO"])].copy()
     if parciales.empty:
         return parciales
 
     # Filtrar por fecha
     def _aplica(row):
-        modalidad = str(row.get("modalidad", "")).upper()
+        modalidad = row["_modalidad_norm"]
         if modalidad == "PARCIAL_CON_FIN":
             return row["fi_parsed"] == target_date
         if modalidad == "PARCIAL_ABIERTO":
-            estado = str(row.get("estado", "")).upper()
+            estado = str(row.get("estado", "")).strip().upper()
             return estado == "ACTIVO" and row["fi_parsed"] <= target_date
         return False
 
     mask = parciales.apply(_aplica, axis=1)
-    return parciales[mask].reset_index(drop=True)
+    result = parciales[mask].copy()
+    # Restaurar columna modalidad normalizada al campo original
+    result["modalidad"] = result["_modalidad_norm"]
+    result = result.drop(columns=["_modalidad_norm"])
+    return result.reset_index(drop=True)
 
 
 def get_active_partial_permit_for_employee(employee_id, target_date=None):
