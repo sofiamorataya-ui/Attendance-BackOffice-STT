@@ -421,46 +421,41 @@ def _render_register_form(employees_active: pd.DataFrame):
             type="secondary",
         ):
             try:
-                rows_to_delete = edited_df[edited_df["Eliminar"]].copy()
-                deleted_count = 0
-                ws = get_worksheet(WS_OVERTIME)
-                all_rows = ws.get_all_values()
+                from core.sheets import delete_rows_batch
 
+                rows_to_delete = edited_df[edited_df["Eliminar"]].copy()
+                ws = get_worksheet(WS_OVERTIME)
+                all_rows = ws.get_all_values()  # 1 sola lectura
+
+                headers_row = all_rows[0]
+                try:
+                    idx_fecha = headers_row.index("fecha")
+                    idx_emp = headers_row.index("empleado_nombre")
+                    idx_ts = headers_row.index("timestamp")
+                except ValueError:
+                    notify_error("Headers del sheet incompletos.")
+                    return
+
+                # Resolver TODOS los índices de fila ANTES de borrar nada
+                # (borrar entre medio corre los índices). Match por fecha+empleado+timestamp.
+                target_indices = []
                 for _, dr in rows_to_delete.iterrows():
                     orig_idx = int(dr["_id"])
                     target = df_recent.iloc[orig_idx]
-                    target_fecha = target.get("fecha", "")
-                    target_emp = target.get("empleado_nombre", "")
-                    target_horas = str(target.get("horas", ""))
+                    target_fecha = str(target.get("fecha", ""))
+                    target_emp = str(target.get("empleado_nombre", ""))
                     target_ts = str(target.get("timestamp", ""))
 
-                    # Buscar la fila exacta en el sheet por timestamp+empleado+fecha
-                    headers_row = all_rows[0]
-                    try:
-                        idx_fecha = headers_row.index("fecha")
-                        idx_emp = headers_row.index("empleado_nombre")
-                        idx_ts = headers_row.index("timestamp")
-                    except ValueError:
-                        notify_error("Headers del sheet incompletos.")
-                        return
-
-                    target_row_idx = None
                     for i, srow in enumerate(all_rows[1:], start=2):
                         if (len(srow) > max(idx_fecha, idx_emp, idx_ts)
-                                and srow[idx_fecha] == str(target_fecha)
-                                and srow[idx_emp] == str(target_emp)
+                                and srow[idx_fecha] == target_fecha
+                                and srow[idx_emp] == target_emp
                                 and srow[idx_ts] == target_ts):
-                            target_row_idx = i
+                            target_indices.append(i)
                             break
 
-                    if target_row_idx:
-                        delete_row(WS_OVERTIME, target_row_idx)
-                        deleted_count += 1
-                        # Reload all_rows para mantener los índices correctos
-                        all_rows = get_worksheet(WS_OVERTIME).get_all_values()
-
-                from core.sheets import invalidate_cache
-                invalidate_cache()
+                # Un solo request borra todas las filas (de mayor a menor índice)
+                deleted_count = delete_rows_batch(WS_OVERTIME, target_indices)
                 notify_success(f"{deleted_count} registro(s) eliminado(s).", title="Eliminados")
                 st.rerun()
             except Exception as e:
@@ -475,9 +470,10 @@ def _render_register_form(employees_active: pd.DataFrame):
         ):
             try:
                 from core.time_utils import parse_time as _parse_time, time_to_minutes
+                from core.sheets import batch_update_cells, _col_letter
 
                 ws = get_worksheet(WS_OVERTIME)
-                all_rows = ws.get_all_values()
+                all_rows = ws.get_all_values()  # 1 sola lectura
                 headers_row = all_rows[0]
                 try:
                     idx_fecha = headers_row.index("fecha")
@@ -502,12 +498,28 @@ def _render_register_form(employees_active: pd.DataFrame):
                         "Ve a Setup → 'Crear/verificar headers' para agregarlas automáticamente."
                     )
 
+                n_cols = len(headers_row)
+                last_col = _col_letter(n_cols - 1)
+
+                # Índice timestamp -> (fila_1based, fila_cruda) para localizar sin re-buscar
+                ts_to_row = {}
+                for j, srow in enumerate(all_rows[1:], start=2):
+                    if len(srow) > idx_ts:
+                        ts_to_row[srow[idx_ts]] = (j, srow)
+
+                updates = []  # se acumulan y se mandan en UN solo batch
                 changes = 0
                 for i, edited in edited_df.iterrows():
                     if edited["Eliminar"]:
                         continue  # los de Eliminar van por otro botón
                     orig_idx = int(edited["_id"])
                     orig = df_recent.iloc[orig_idx]
+                    orig_ts = str(orig.get("timestamp", ""))
+
+                    found = ts_to_row.get(orig_ts)
+                    if not found:
+                        continue
+                    target_row_idx, srow = found
 
                     new_fecha = str(edited["Fecha"])
                     new_emp_name = str(edited["Empleado"])
@@ -535,33 +547,34 @@ def _render_register_form(employees_active: pd.DataFrame):
                     emp_row_match = employees_active[employees_active["nombre"] == new_emp_name]
                     new_emp_id = int(emp_row_match.iloc[0]["id"]) if not emp_row_match.empty else orig.get("empleado_id", "")
 
-                    # Encontrar fila original en el sheet
-                    orig_ts = str(orig.get("timestamp", ""))
-                    target_row_idx = None
-                    for j, srow in enumerate(all_rows[1:], start=2):
-                        if (len(srow) > idx_ts and srow[idx_ts] == orig_ts):
-                            target_row_idx = j
-                            break
-                    if target_row_idx is None:
+                    # Reconstruir la fila COMPLETA desde la original: así preservamos
+                    # timestamp y cualquier columna extra, y solo tocamos lo editable.
+                    base_row = (list(srow) + [""] * n_cols)[:n_cols]
+                    new_row = list(base_row)
+                    new_row[idx_fecha] = new_fecha
+                    new_row[idx_emp_id] = new_emp_id
+                    new_row[idx_emp] = new_emp_name
+                    new_row[idx_horas] = new_horas_final
+                    new_row[idx_motivo] = new_motivo
+                    new_row[idx_aprob] = new_aprob
+                    new_row[idx_rec] = new_rec
+                    if idx_hi is not None:
+                        new_row[idx_hi] = hi_p.strftime("%H:%M") if hi_p else ""
+                    if idx_hf is not None:
+                        new_row[idx_hf] = hf_p.strftime("%H:%M") if hf_p else ""
+
+                    # Saltar filas sin cambios reales (compara celda por celda como texto)
+                    if [str(x) for x in base_row] == [str(x) for x in new_row]:
                         continue
 
-                    # Actualizar cada celda
-                    ws.update_cell(target_row_idx, idx_fecha + 1, new_fecha)
-                    ws.update_cell(target_row_idx, idx_emp_id + 1, new_emp_id)
-                    ws.update_cell(target_row_idx, idx_emp + 1, new_emp_name)
-                    ws.update_cell(target_row_idx, idx_horas + 1, new_horas_final)
-                    ws.update_cell(target_row_idx, idx_motivo + 1, new_motivo)
-                    ws.update_cell(target_row_idx, idx_aprob + 1, new_aprob)
-                    ws.update_cell(target_row_idx, idx_rec + 1, new_rec)
-                    if idx_hi is not None:
-                        ws.update_cell(target_row_idx, idx_hi + 1, hi_p.strftime("%H:%M") if hi_p else "")
-                    if idx_hf is not None:
-                        ws.update_cell(target_row_idx, idx_hf + 1, hf_p.strftime("%H:%M") if hf_p else "")
+                    updates.append({
+                        "range": f"A{target_row_idx}:{last_col}{target_row_idx}",
+                        "values": [new_row],
+                    })
                     changes += 1
 
-                from core.sheets import invalidate_cache
-                invalidate_cache()
                 if changes > 0:
+                    batch_update_cells(WS_OVERTIME, updates)  # 1 sola escritura
                     notify_success(f"{changes} registro(s) actualizados.", title="Cambios guardados")
                     st.rerun()
                 else:
