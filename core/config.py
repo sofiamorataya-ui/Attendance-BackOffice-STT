@@ -23,7 +23,7 @@ TZ_GUATEMALA = pytz.timezone("America/Guatemala")
 # ============================================================
 REFRESH_LIVE_DASHBOARD = 60         # Dashboard "Asistencia en Vivo"
 REFRESH_OTHER_TABS = 300            # Resto de pestañas (5 min)
-CACHE_TTL_SHEETS = 5                # TTL de caché de lectura de Google Sheets
+CACHE_TTL_SHEETS = 30              # TTL de caché de lectura de Google Sheets (segundos)
 
 # ============================================================
 # PALETA DE COLORES STT
