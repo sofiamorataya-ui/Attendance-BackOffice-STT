@@ -3,17 +3,75 @@ core/sheets.py
 Cliente de Google Sheets: conexión, lectura cacheada y escritura.
 Usa el patrón de service account (mismo que Viáticos Argos).
 """
+import time
+import random
 import streamlit as st
 import gspread
 import pandas as pd
+from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
-from typing import Optional
+from typing import Optional, Callable
 from core.config import CACHE_TTL_SHEETS, ALL_WORKSHEETS
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+
+
+# ============================================================
+# RETRY / BACKOFF ANTE CUOTA (429) Y ERRORES TRANSITORIOS (5xx)
+# ============================================================
+def _status_of(err: APIError) -> int:
+    """
+    Extrae el código de error de un APIError de gspread.
+    gspread expone .code (parseado del cuerpo del error de Google, que para cuota
+    es 429), .response.status_code, y .error['status'] (texto, p.ej.
+    RESOURCE_EXHAUSTED). Probamos en ese orden, sin depender de str(err).
+    """
+    for getter in (
+        lambda e: int(e.code),
+        lambda e: int(e.response.status_code),
+        lambda e: int(e.error.get("code")),
+    ):
+        try:
+            v = getter(err)
+            if v and v > 0:
+                return v
+        except Exception:
+            pass
+    try:
+        status = str(err.error.get("status", "")).upper()
+        if "RESOURCE_EXHAUSTED" in status:
+            return 429
+        if "UNAVAILABLE" in status or "INTERNAL" in status:
+            return 503
+    except Exception:
+        pass
+    return 0
+
+
+def _with_retry(fn: Callable, *args, _max_attempts: int = 5, _base_delay: float = 1.0, **kwargs):
+    """
+    Ejecuta fn con reintentos exponenciales + jitter cuando Google responde 429
+    (cuota excedida) o 5xx (error transitorio). Para cualquier otro error, propaga
+    de inmediato. Esto evita que una ráfaga puntual tumbe toda la operación.
+    """
+    last_err = None
+    for attempt in range(_max_attempts):
+        try:
+            return fn(*args, **kwargs)
+        except APIError as e:
+            status = _status_of(e)
+            if status not in (429, 500, 502, 503):
+                raise
+            last_err = e
+            if attempt == _max_attempts - 1:
+                break
+            # Backoff exponencial con jitter: ~1s, 2s, 4s, 8s (+/- aleatorio)
+            delay = _base_delay * (2 ** attempt) + random.uniform(0, 0.75)
+            time.sleep(delay)
+    raise last_err
 
 
 # ============================================================
@@ -35,8 +93,18 @@ def get_spreadsheet() -> gspread.Spreadsheet:
     return client.open_by_key(sheet_id)
 
 
+@st.cache_resource(show_spinner=False)
 def get_worksheet(name: str) -> gspread.Worksheet:
-    """Obtiene una worksheet por nombre. Sin caché para evitar tokens expirados en escrituras."""
+    """
+    Obtiene una worksheet por nombre, cacheada a nivel de recurso.
+
+    Por qué cachear es seguro: el token de autenticación vive en el CLIENTE
+    (get_gspread_client, también cacheado) y google-auth lo refresca solo. El
+    objeto worksheet solo guarda su id/gid y una referencia al cliente, así que
+    no caduca. Cachearlo evita un fetch_sheet_metadata (= 1 lectura a la API)
+    en CADA operación de lectura/escritura, que era una fuente grande de
+    consumo de cuota.
+    """
     ss = get_spreadsheet()
     return ss.worksheet(name)
 
@@ -57,7 +125,7 @@ def read_worksheet(name: str) -> pd.DataFrame:
     ws = get_worksheet(name)
     # Lectura robusta: NO usar get_all_records() (rompe con duplicados/vacíos)
     # Usar get_all_values() y construir el DataFrame manualmente
-    all_values = ws.get_all_values()
+    all_values = _with_retry(ws.get_all_values)
     if not all_values:
         return pd.DataFrame()
 
@@ -113,45 +181,106 @@ def invalidate_cache():
 def append_row(worksheet_name: str, row: list) -> None:
     """Agrega una fila al final de la worksheet."""
     ws = get_worksheet(worksheet_name)
-    ws.append_row(row, value_input_option="USER_ENTERED")
+    _with_retry(ws.append_row, row, value_input_option="USER_ENTERED")
     invalidate_cache()
 
 
 def append_rows(worksheet_name: str, rows: list[list]) -> None:
     """Agrega múltiples filas al final."""
     ws = get_worksheet(worksheet_name)
-    ws.append_rows(rows, value_input_option="USER_ENTERED")
+    _with_retry(ws.append_rows, rows, value_input_option="USER_ENTERED")
     invalidate_cache()
 
 
 def update_cell(worksheet_name: str, row_idx: int, col_idx: int, value) -> None:
     """Actualiza una celda específica (índices 1-based)."""
     ws = get_worksheet(worksheet_name)
-    ws.update_cell(row_idx, col_idx, value)
+    _with_retry(ws.update_cell, row_idx, col_idx, value)
     invalidate_cache()
 
 
 def update_row(worksheet_name: str, row_idx: int, values: list) -> None:
     """Actualiza una fila completa por índice (1-based)."""
     ws = get_worksheet(worksheet_name)
-    end_col = chr(ord("A") + len(values) - 1)
-    ws.update(f"A{row_idx}:{end_col}{row_idx}", [values], value_input_option="USER_ENTERED")
+    end_col = _col_letter(len(values) - 1)
+    rng = f"A{row_idx}:{end_col}{row_idx}"
+    _with_retry(ws.update, [values], rng, value_input_option="USER_ENTERED")
     invalidate_cache()
 
 
 def delete_row(worksheet_name: str, row_idx: int) -> None:
     """Elimina una fila por índice (1-based)."""
     ws = get_worksheet(worksheet_name)
-    ws.delete_rows(row_idx)
+    _with_retry(ws.delete_rows, row_idx)
     invalidate_cache()
+
+
+def batch_update_cells(worksheet_name: str, updates: list[dict]) -> int:
+    """
+    Aplica MÚLTIPLES rangos en UNA sola llamada a la API (1 request total).
+
+    updates: lista de dicts {"range": "A2:J2", "values": [[...]]}.
+    Devuelve cuántos rangos se enviaron. Si la lista está vacía, no llama a la API.
+
+    Reemplaza el antipatrón de N llamadas update_cell por operación: pasar de
+    decenas de escrituras (que reventaban la cuota de 60/min) a una sola.
+    """
+    if not updates:
+        return 0
+    ws = get_worksheet(worksheet_name)
+    _with_retry(ws.batch_update, updates, value_input_option="USER_ENTERED")
+    invalidate_cache()
+    return len(updates)
+
+
+def delete_rows_batch(worksheet_name: str, row_indices: list[int]) -> int:
+    """
+    Elimina varias filas (índices 1-based) en UNA sola llamada a la API.
+
+    Usa spreadsheet.batch_update con deleteDimension, ordenando de mayor a menor
+    para que los índices no se corran entre borrados. Devuelve cuántas filas se
+    eliminaron. Si la lista está vacía, no llama a la API.
+    """
+    rows = sorted({int(r) for r in row_indices if r}, reverse=True)
+    if not rows:
+        return 0
+    ws = get_worksheet(worksheet_name)
+    ss = get_spreadsheet()
+    sheet_id = ws.id
+    requests = [
+        {
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": r - 1,   # 0-based, inclusive
+                    "endIndex": r,         # exclusivo
+                }
+            }
+        }
+        for r in rows
+    ]
+    _with_retry(ss.batch_update, {"requests": requests})
+    invalidate_cache()
+    return len(rows)
 
 
 def overwrite_worksheet(worksheet_name: str, headers: list, rows: list[list]) -> None:
     """Borra y reescribe completamente una worksheet (usado para seed)."""
     ws = get_worksheet(worksheet_name)
-    ws.clear()
-    ws.update("A1", [headers] + rows, value_input_option="USER_ENTERED")
+    _with_retry(ws.clear)
+    _with_retry(ws.update, [headers] + rows, "A1", value_input_option="USER_ENTERED")
     invalidate_cache()
+
+
+def _col_letter(n: int) -> str:
+    """Convierte un índice de columna 0-based a letra(s) de Sheets (0->A, 26->AA)."""
+    s = ""
+    n0 = n
+    while n0 >= 0:
+        s = chr(ord("A") + n0 % 26) + s
+        n0 = n0 // 26 - 1
+    return s
 
 
 # ============================================================
