@@ -44,10 +44,17 @@ def render():
         employees_df["activo"].astype(str).str.upper().isin(["TRUE", "VERDADERO", "SI", "1"])
     ].copy() if not employees_df.empty else pd.DataFrame()
 
+    # ============================================================
+    # ALTA MANUAL DE INCIDENCIAS
+    # Va ANTES de cualquier early-return para que el botón exista
+    # aunque no haya registros o el período filtrado esté vacío.
+    # ============================================================
+    _render_new_incident_bar(employees_active)
+
     df_full = load_incidents_df()
     if df_full.empty:
         st.info("📭 No hay incidencias registradas todavía.")
-        st.caption("Las incidencias se registran desde el dashboard '🟢 Asistencia en Vivo'.")
+        st.caption("Puedes crear la primera con «➕ Nuevo registro», o desde el dashboard '🟢 Asistencia en Vivo'.")
         return
 
     # ============================================================
@@ -70,6 +77,7 @@ def render():
 
     if df.empty:
         st.info(f"📭 Sin incidencias en {period_label.lower()}.")
+        st.caption("Usa «➕ Nuevo registro» (arriba) para agregar una manualmente.")
         return
 
     df["duracion_calc"] = df.apply(compute_row_duration, axis=1)
@@ -88,6 +96,174 @@ def render():
 
     with tab_table:
         _render_table_tab(df, employees_active, period_label)
+
+
+# ============================================================
+# ALTA MANUAL DE INCIDENCIAS
+# ============================================================
+def _render_new_incident_bar(employees_active: pd.DataFrame):
+    """Barra superior con el botón para dar de alta una incidencia manualmente."""
+    col_txt, col_btn = st.columns([4, 1])
+    with col_txt:
+        st.markdown(
+            '<div style="padding-top:6px;font-size:12px;color:#64748B;">'
+            'Registra una incidencia manualmente (incluye fechas pasadas) sin salir de este módulo.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    with col_btn:
+        clicked = st.button(
+            "➕ Nuevo registro",
+            use_container_width=True,
+            type="primary",
+            key="inc_new_open",
+            help="Agregar una incidencia manualmente",
+        )
+
+    if clicked:
+        _show_new_incident_dialog(employees_active)
+
+
+@st.dialog("Nueva incidencia", width="large")
+def _show_new_incident_dialog_impl(employees_active: pd.DataFrame):
+    """
+    Alta manual de incidencia desde el módulo de Incidencias.
+
+    - Permite elegir empleado y fecha (incluida una fecha pasada).
+    - Con hora fin → queda CERRADA con duración calculada.
+    - Sin hora fin → queda ACTIVA (solo se permite si la fecha es hoy).
+    """
+    from core.incidents import register_incident, calculate_duration_minutes
+
+    if employees_active is None or employees_active.empty:
+        st.error("No hay empleados activos para registrar incidencias.")
+        return
+
+    st.markdown("### 🚨 Registrar incidencia")
+
+    emp_names = sorted(employees_active["nombre"].astype(str).tolist())
+
+    col_emp, col_fecha = st.columns([1.4, 1])
+    with col_emp:
+        emp_name = st.selectbox("Empleado", options=emp_names, key="incnew_emp")
+    with col_fecha:
+        fecha_inc = st.date_input(
+            "Fecha",
+            value=today_gt(),
+            max_value=today_gt(),
+            format="DD/MM/YYYY",
+            key="incnew_fecha",
+        )
+
+    is_past_day = fecha_inc != today_gt()
+
+    emp_row = employees_active[employees_active["nombre"].astype(str) == str(emp_name)]
+    try:
+        emp_id = int(emp_row.iloc[0]["id"])
+    except Exception:
+        st.error("No se pudo resolver el ID del empleado seleccionado.")
+        return
+
+    tipo = st.selectbox(
+        "Tipo de incidencia",
+        options=INCIDENT_TYPES,
+        format_func=lambda x: f"{INCIDENT_ICONS.get(x, '?')}  {INCIDENT_LABELS.get(x, x)}",
+        key="incnew_tipo",
+    )
+
+    # En fecha pasada la hora fin es obligatoria: no puede quedar "en curso".
+    dejar_activa = False
+    if not is_past_day:
+        dejar_activa = st.checkbox(
+            "Dejar ACTIVA (en curso, sin hora fin)",
+            value=False,
+            key="incnew_activa",
+            help="Se cierra después desde la pestaña 'Activas ahora'.",
+        )
+    else:
+        st.info(
+            f"📅 Registro **retroactivo** al **{fecha_inc.strftime('%d/%m/%Y')}**: "
+            f"hora inicio y hora fin son obligatorias."
+        )
+
+    now_time_obj = now_gt().time().replace(second=0, microsecond=0)
+    default_hi = _t(8, 0) if is_past_day else now_time_obj
+
+    col_hi, col_hf = st.columns(2)
+    with col_hi:
+        hora_inicio = st.time_input(
+            "Hora inicio", value=default_hi, step=60, key="incnew_hi",
+        )
+    with col_hf:
+        if dejar_activa:
+            st.markdown(
+                '<div style="padding-top:34px;font-size:12px;color:#94A3B8;">'
+                'Sin hora fin (queda en curso)</div>',
+                unsafe_allow_html=True,
+            )
+            hora_fin = None
+        else:
+            hora_fin = st.time_input(
+                "Hora fin", value=default_hi, step=60, key="incnew_hf",
+            )
+
+    nota = st.text_input(
+        "Nota (opcional)",
+        placeholder="Ej: Reportado por WhatsApp",
+        max_chars=200,
+        key="incnew_nota",
+    )
+
+    if hora_inicio and hora_fin:
+        preview_min = calculate_duration_minutes(hora_inicio, hora_fin)
+        if preview_min > 0:
+            st.success(f"✅ Duración calculada: **{format_duration(preview_min)}** ({preview_min} min)")
+        else:
+            st.warning("⚠️ La hora fin debe ser posterior a la hora inicio.")
+
+    st.divider()
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("Cancelar", use_container_width=True, key="incnew_cancel"):
+            st.rerun()
+
+    with col_b:
+        invalid = (hora_inicio is None) or (not dejar_activa and hora_fin is None)
+        if st.button(
+            "✓ Guardar incidencia",
+            use_container_width=True,
+            type="primary",
+            disabled=invalid,
+            key="incnew_submit",
+        ):
+            try:
+                result = register_incident(
+                    employee_id=emp_id,
+                    employee_name=emp_name,
+                    tipo=tipo,
+                    hora_inicio=hora_inicio,
+                    hora_fin=None if dejar_activa else hora_fin,
+                    nota=nota,
+                    registered_by=current_user_display_name(),
+                    fecha_incidencia=fecha_inc,
+                )
+                if result["success"]:
+                    notify_success(
+                        f"{emp_name} · {INCIDENT_LABELS.get(tipo, tipo)} · "
+                        f"{fecha_inc.strftime('%d/%m/%Y')}",
+                        title="Incidencia registrada",
+                    )
+                    st.rerun()
+                else:
+                    notify_error(result["message"])
+            except Exception as e:
+                notify_error(str(e))
+
+
+def _show_new_incident_dialog(employees_active: pd.DataFrame):
+    """Wrapper. Streamlit dialog API."""
+    _show_new_incident_dialog_impl(employees_active)
 
 
 # ============================================================
