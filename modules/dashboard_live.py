@@ -855,6 +855,7 @@ def render():
             f'padding:12px 18px;border-radius:0 4px 4px 0;margin-bottom:16px;'
             f'font-size:12px;color:#92400E;">'
             f'📊 <strong>Modo histórico</strong> · Visualizando {period_label.lower()}. '
+            f'Puedes registrar incidencias retroactivas con el botón 🚨 de cada fila. '
             f'Selecciona "Día" + fecha de hoy para volver al modo en vivo.'
             f'</div>',
             unsafe_allow_html=True,
@@ -1143,10 +1144,12 @@ def _render_live_timeline(statuses, target_date=None, read_only=False):
     # SECCIÓN 3: Renderizar cada país
     # ============================================================
     if gt_sorted:
-        _render_country_section("GT", "Guatemala", "GT · 01", gt_hours, gt_sorted, read_only=read_only)
+        _render_country_section("GT", "Guatemala", "GT · 01", gt_hours, gt_sorted,
+                                read_only=read_only, target_date=target_date)
 
     if ve_sorted:
-        _render_country_section("VE", "Venezuela", "VE · 02", ve_hours, ve_sorted, read_only=read_only)
+        _render_country_section("VE", "Venezuela", "VE · 02", ve_hours, ve_sorted,
+                                read_only=read_only, target_date=target_date)
 
     # Banner inferior: distinto en vivo vs histórico
     if read_only and target_date is not None:
@@ -1174,7 +1177,8 @@ def _render_live_timeline(statuses, target_date=None, read_only=False):
 
 
 def _render_country_section(country_code: str, country_name: str, tag: str,
-                             hours_value: float, sorted_statuses: list, read_only: bool = False):
+                             hours_value: float, sorted_statuses: list, read_only: bool = False,
+                             target_date=None):
     """
     Renderiza un país: header + timeline header + por cada empleado [fila + expander].
     TODOS los iframes van dentro de las mismas columnas [20, 1, 1] para que el ancho
@@ -1223,16 +1227,20 @@ def _render_country_section(country_code: str, country_name: str, tag: str,
 
     # ---- Por cada empleado: fila visual + expander nativo ----
     for s in sorted_statuses:
-        _render_employee_row_with_form(s, read_only=read_only)
+        _render_employee_row_with_form(s, read_only=read_only, target_date=target_date)
 
 
 
-def _render_employee_row_with_form(status_data: dict, read_only: bool = False):
+def _render_employee_row_with_form(status_data: dict, read_only: bool = False, target_date=None):
     """
     Fila completa de empleado:
     - Columna izquierda (95% ancho): iframe con la fila visual (nombre, avatar, segmentos, AHORA)
     - Columna derecha (5% ancho): botón 🚨 nativo de Streamlit
     Click en 🚨 → abre dialog popup con el form de incidencia.
+
+    Args:
+        target_date: día visualizado. None = hoy (modo vivo). En un día pasado se
+                     conserva el botón 🚨 para registrar incidencias retroactivas.
     """
     from core.incidents import calculate_duration_minutes
     from datetime import time as _t
@@ -1242,11 +1250,15 @@ def _render_employee_row_with_form(status_data: dict, read_only: bool = False):
     emp_id = int(emp["id"])
     emp_name = emp["nombre"]
 
-    # Overlay de "AHORA" en esta fila (línea vertical)
+    view_date = target_date or today_gt()
+    is_past_day = view_date != today_gt()
+
+    # Overlay de "AHORA" en esta fila (línea vertical).
+    # Solo aplica si la fila es del día de hoy: en histórico no hay un "ahora".
     now_overlay_html = ""
     try:
         nt = current_time_gt()
-        if _t(TIMELINE_START_HOUR, 0) <= nt <= _t(TIMELINE_END_HOUR, 0):
+        if not is_past_day and _t(TIMELINE_START_HOUR, 0) <= nt <= _t(TIMELINE_END_HOUR, 0):
             from core.time_utils import time_to_position_pct
             pct = time_to_position_pct(nt, _t(TIMELINE_START_HOUR, 0), _t(TIMELINE_END_HOUR, 0))
             now_overlay_html = (
@@ -1287,10 +1299,23 @@ def _render_employee_row_with_form(status_data: dict, read_only: bool = False):
     # MODO READ-ONLY (histórico): solo el iframe a ancho completo, sin botones
     # ============================================================
     if read_only:
-        # Mantener mismas columnas [20,1,1] para que el ancho coincida con el header
-        col_row, _s1, _s2 = st.columns([20, 1, 1])
+        # Mantener mismas columnas [20,1,1] para que el ancho coincida con el header.
+        # Aunque la vista sea de solo lectura, se conserva el botón 🚨 para poder
+        # registrar una incidencia CON FECHA RETROACTIVA sobre el día visualizado.
+        col_row, col_btn_inc, _s2 = st.columns([20, 1, 1])
         with col_row:
             components.html(full_row_html, height=75, scrolling=False)
+
+        with col_btn_inc:
+            st.markdown("<div style='padding-top:18px;'></div>", unsafe_allow_html=True)
+            clicked_hist = st.button(
+                "🚨",
+                key=f"open_dialog_hist_{emp_id}_{view_date.isoformat()}",
+                help=f"Registrar incidencia de {emp_name} para el {view_date.strftime('%d/%m/%Y')}",
+            )
+
+        if clicked_hist:
+            _show_incident_dialog(emp_id, emp_name, status_data, target_date=view_date)
         return
 
     # ============================================================
@@ -1464,16 +1489,32 @@ def _show_terminate_dialog(emp_id: int, emp_name: str, status_data: dict, active
 
 
 @st.dialog("Registrar incidencia", width="large")
-def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
+def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict, target_date=None):
     """
     Dialog popup nativo de Streamlit.
     Campos: tipo, hora inicio (texto), hora fin (texto), nota.
     Las horas se escriben directo con teclado: 07:15, 7:15, 715, etc.
+
+    Args:
+        target_date: fecha a la que se imputa la incidencia. None = hoy.
+                     Si es un día pasado, el registro es RETROACTIVO y exige
+                     hora inicio + hora fin (no se puede dejar "activa").
     """
     from core.incidents import calculate_duration_minutes
     from core.time_utils import parse_time as _parse_time, current_time_gt
+    from datetime import time as _t, datetime as _dt, timedelta as _td
+
+    fecha_inc = target_date or today_gt()
+    is_past_day = fecha_inc != today_gt()
+    dkey = fecha_inc.isoformat()
 
     st.markdown(f"### 🚨 Incidencia para **{emp_name}**")
+
+    if is_past_day:
+        st.info(
+            f"📅 Registro **retroactivo** al **{fecha_inc.strftime('%d/%m/%Y')}**. "
+            f"Debes indicar hora inicio y hora fin."
+        )
 
     # Mostrar incidencias activas si las hay
     active_inc = status_data.get("active_incident")
@@ -1489,28 +1530,36 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
         "Tipo de incidencia",
         options=INCIDENT_TYPES,
         format_func=lambda x: f"{INCIDENT_ICONS.get(x, '?')}  {INCIDENT_LABELS.get(x, x)}",
-        key=f"dlg_tipo_{emp_id}",
+        key=f"dlg_tipo_{emp_id}_{dkey}",
     )
 
-    now_hhmm = current_time_gt().strftime("%H:%M")
+    # Valores por defecto de hora:
+    # - Hoy → hora actual (comportamiento de siempre)
+    # - Día pasado → hora de entrada programada de ese empleado (o 08:00) y +30 min
+    if is_past_day:
+        entrada = status_data.get("entrada")
+        default_hi = entrada if isinstance(entrada, _t) else _t(8, 0)
+        default_hf = (_dt.combine(fecha_inc, default_hi) + _td(minutes=30)).time()
+    else:
+        default_hi = current_time_gt().replace(second=0, microsecond=0)
+        default_hf = default_hi
 
     # CAMPOS DE HORA NATIVOS (st.time_input con formato 12h AM/PM)
     col_hi, col_hf = st.columns(2)
-    now_time_obj = current_time_gt().replace(second=0, microsecond=0)
     with col_hi:
         hi_parsed = st.time_input(
             "Hora inicio",
-            value=now_time_obj,
+            value=default_hi,
             step=60,
-            key=f"dlg_hi_{emp_id}",
+            key=f"dlg_hi_{emp_id}_{dkey}",
             help="Editable: escribe HH:MM AM/PM directamente.",
         )
     with col_hf:
         hf_parsed = st.time_input(
             "Hora fin",
-            value=now_time_obj,
+            value=default_hf,
             step=60,
-            key=f"dlg_hf_{emp_id}",
+            key=f"dlg_hf_{emp_id}_{dkey}",
             help="Editable: escribe HH:MM AM/PM directamente.",
         )
 
@@ -1518,7 +1567,7 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
         "Nota (opcional)",
         placeholder="Ej: Reportado por WhatsApp",
         max_chars=200,
-        key=f"dlg_nota_{emp_id}",
+        key=f"dlg_nota_{emp_id}_{dkey}",
     )
 
     # Vista previa de duración
@@ -1534,11 +1583,13 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
     # ============================================================
     # BOTÓN: ▶ INICIAR AHORA (sin hora fin, queda ACTIVA)
     # ============================================================
-    if not active_inc:  # Solo si NO hay incidencia activa
+    # "Iniciar AHORA" solo tiene sentido en el día de hoy: una incidencia ACTIVA
+    # en una fecha pasada calcularía su duración contra la hora actual.
+    if not active_inc and not is_past_day:
         if st.button(
             f"▶  Iniciar AHORA ({current_time_gt().strftime('%H:%M')})  ·  sin hora fin (queda activa)",
             use_container_width=True,
-            key=f"dlg_start_now_{emp_id}",
+            key=f"dlg_start_now_{emp_id}_{dkey}",
             help="Inicia una incidencia con la hora actual. Después la cierras con 'Terminar'.",
         ):
             try:
@@ -1569,7 +1620,7 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
     col_a, col_b = st.columns(2)
 
     with col_a:
-        if st.button("Cancelar", use_container_width=True, key=f"dlg_cancel_{emp_id}"):
+        if st.button("Cancelar", use_container_width=True, key=f"dlg_cancel_{emp_id}_{dkey}"):
             st.rerun()
 
     with col_b:
@@ -1579,7 +1630,7 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
             use_container_width=True,
             type="primary",
             disabled=submit_disabled,
-            key=f"dlg_submit_{emp_id}",
+            key=f"dlg_submit_{emp_id}_{dkey}",
         ):
             try:
                 result = register_incident(
@@ -1590,10 +1641,12 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
                     hora_fin=hf_parsed,
                     nota=nota,
                     registered_by=current_user_display_name(),
+                    fecha_incidencia=fecha_inc,
                 )
                 if result["success"]:
                     notify_success(
-                        f"{emp_name} · {INCIDENT_LABELS.get(tipo)} · {format_duration(result['duracion_min'])}",
+                        f"{emp_name} · {INCIDENT_LABELS.get(tipo)} · {format_duration(result['duracion_min'])}"
+                        + (f" · {fecha_inc.strftime('%d/%m/%Y')}" if is_past_day else ""),
                         title="Incidencia registrada"
                     )
                     from core.sheets import invalidate_cache
@@ -1605,9 +1658,9 @@ def _show_incident_dialog_impl(emp_id: int, emp_name: str, status_data: dict):
                 notify_error(str(e))
 
 
-def _show_incident_dialog(emp_id: int, emp_name: str, status_data: dict):
+def _show_incident_dialog(emp_id: int, emp_name: str, status_data: dict, target_date=None):
     """Wrapper. Streamlit dialog API."""
-    _show_incident_dialog_impl(emp_id, emp_name, status_data)
+    _show_incident_dialog_impl(emp_id, emp_name, status_data, target_date=target_date)
 
 
 # ============================================================
